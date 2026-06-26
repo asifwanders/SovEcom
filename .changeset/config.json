@@ -2,10 +2,19 @@
   "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [["@sovecom/*"]],
+  "fixed": [],
   "linked": [],
-  "access": "restricted",
+  "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": []
+  "ignore": [
+    "@sovecom/admin",
+    "@sovecom/api",
+    "@sovecom/setup",
+    "@sovecom/storefront-next",
+    "@sovecom/eslint-config",
+    "@sovecom/module-contract-tests",
+    "@sovecom/theme-contract-tests",
+    "sovecom"
+  ]
 }

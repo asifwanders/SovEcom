@@ -48,6 +48,7 @@ lerna-debug.log*
 .env
 .env.*
 !.env.example
+!.env.production.example
 *.key
 /data/master.key
 *.pem

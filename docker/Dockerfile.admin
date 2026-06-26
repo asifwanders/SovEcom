@@ -1,19 +1,37 @@
-# Build stage
-FROM node:24.14.1-alpine AS builder
+# ── builder ─────────────────────────────────────────────────────────────────
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
+RUN npm install -g pnpm@11.4.0
+
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
+
+COPY packages/client-js/package.json       ./packages/client-js/package.json
+COPY packages/module-sdk/package.json      ./packages/module-sdk/package.json
+COPY packages/theme-sdk/package.json       ./packages/theme-sdk/package.json
+COPY packages/eslint-config/package.json   ./packages/eslint-config/package.json
+COPY packages/module-contract-tests/package.json ./packages/module-contract-tests/package.json
+COPY packages/theme-contract-tests/package.json  ./packages/theme-contract-tests/package.json
+COPY packages/create-sovecom-module/package.json ./packages/create-sovecom-module/package.json
+COPY packages/create-sovecom-theme/package.json  ./packages/create-sovecom-theme/package.json
+COPY apps/admin/package.json ./apps/admin/package.json
+
+RUN pnpm install --frozen-lockfile
+
 COPY packages/ ./packages/
 COPY apps/admin/ ./apps/admin/
 COPY brand/ ./brand/
 
-RUN npm install -g pnpm@11.4.0
-RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @sovecom/client-js build
+
+ARG VITE_API_BASE_URL=http://localhost:3000
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
 RUN pnpm --filter @sovecom/admin build
 
-# Production stage - static SPA served by Caddy on :80
+# ── production: static SPA served by Caddy ──────────────────────────────────
 FROM caddy:2-alpine AS production
 
 COPY --from=builder /app/apps/admin/dist /srv

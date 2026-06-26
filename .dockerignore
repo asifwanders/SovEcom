@@ -1,11 +1,38 @@
-node_modules
-.turbo
+# Version control
 .git
+.gitignore
+
+# Node modules (reinstalled inside image)
+node_modules
+**/node_modules
+
+# Build outputs (rebuilt inside image)
 dist
+**/dist
 .next
-.DS_Store
-*.log
+**/.next
+.turbo
+**/.turbo
+
+# pnpm virtual store
+.pnpm-store
+
+# Dev / test artifacts
+coverage
+**/coverage
+
+# Docs and plan files
+docs
+*.md
+
+# Deploy secrets / env
 .env
-.env.local
-.vscode
+.env.*
+!.env.production.example
+.deploy
+
+# OS / editor
+.DS_Store
+*.swp
 .idea
+.vscode

@@ -1,51 +1,58 @@
-# Build stage
-FROM node:24.14.1-alpine AS builder
+# ── builder ─────────────────────────────────────────────────────────────────
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
-# Copy workspace config and root package files
+RUN npm install -g pnpm@11.4.0
+
+# Copy workspace manifests first for layer caching
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
 
-# Copy all workspace packages
-COPY packages/ ./packages/
+# Copy all workspace package manifests
+COPY packages/client-js/package.json       ./packages/client-js/package.json
+COPY packages/module-sdk/package.json      ./packages/module-sdk/package.json
+COPY packages/theme-sdk/package.json       ./packages/theme-sdk/package.json
+COPY packages/eslint-config/package.json   ./packages/eslint-config/package.json
+COPY packages/module-contract-tests/package.json ./packages/module-contract-tests/package.json
+COPY packages/theme-contract-tests/package.json  ./packages/theme-contract-tests/package.json
+COPY packages/create-sovecom-module/package.json ./packages/create-sovecom-module/package.json
+COPY packages/create-sovecom-theme/package.json  ./packages/create-sovecom-theme/package.json
+COPY apps/api/package.json ./apps/api/package.json
 
-# Copy the API app
+RUN pnpm install --frozen-lockfile
+
+# Copy source
+COPY packages/ ./packages/
 COPY apps/api/ ./apps/api/
 
-# Install pnpm
-RUN npm install -g pnpm@11.4.0
-
-# Install dependencies
-RUN pnpm install --frozen-lockfile
+# Build workspace packages that API depends on
+RUN pnpm --filter @sovecom/theme-sdk build
+RUN pnpm --filter @sovecom/module-sdk build
+RUN pnpm --filter @sovecom/client-js build
 
 # Build the API
 RUN pnpm --filter @sovecom/api build
 
-# Production stage
-FROM node:24.14.1-alpine AS production
+# Use pnpm deploy to create a self-contained production deployment
+RUN pnpm deploy --filter @sovecom/api --legacy --prod /app/deploy/api
+
+# Copy migration files and drizzle config
+RUN cp -r apps/api/src/database/migrations /app/deploy/api/src/database/migrations
+COPY apps/api/drizzle.config.ts /app/deploy/api/drizzle.config.ts
+
+# ── production ───────────────────────────────────────────────────────────────
+FROM node:24-alpine AS production
 
 WORKDIR /app
 
-# Install pnpm
-RUN npm install -g pnpm@11.4.0
+# Copy the self-contained deploy output
+COPY --from=builder /app/deploy/api ./
 
-# Copy workspace config and built artifacts
-COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
-COPY tsconfig.base.json ./
-COPY packages/ ./packages/
-COPY apps/api/dist/ ./apps/api/dist/
-COPY apps/api/package.json ./apps/api/package.json
-
-# Install production dependencies only.
-# --ignore-scripts: the runtime image needs no lifecycle scripts, and the root
-# `prepare` (husky) is a devDependency absent from a --prod install.
-RUN pnpm install --frozen-lockfile --prod --ignore-scripts
-
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+# Create uploads dir and non-root user
+RUN mkdir -p /data/uploads && addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001 && chown -R nodejs:nodejs /data/uploads
 USER nodejs
 
 EXPOSE 3000
 
-CMD ["node", "apps/api/dist/main.js"]
+CMD ["node", "dist/main.js"]

@@ -1,0 +1,24 @@
+# Dev Caddyfile - *.localhost routing, no TLS.
+{
+	auto_https off
+}
+
+http://localhost, http://storefront.localhost {
+	reverse_proxy storefront:3001
+	log {
+		output stdout
+		format json
+	}
+}
+
+http://admin.localhost {
+	reverse_proxy admin:80
+}
+
+http://setup.localhost {
+	reverse_proxy setup:80
+}
+
+http://api.localhost {
+	reverse_proxy api:3000
+}

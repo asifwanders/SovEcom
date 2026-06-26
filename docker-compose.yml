@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg17 # postgres 17 + pgvector (embedding columns need the `vector` extension)
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_DB: sovecom
       POSTGRES_USER: sovecom
@@ -17,8 +17,9 @@ services:
 
   redis:
     image: redis:7
+    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD:?REDIS_PASSWORD must be set}']
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD}', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -29,11 +30,29 @@ services:
     image: getmeili/meilisearch:v1.8
     environment:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?MEILI_MASTER_KEY must be set}
-    # No healthcheck: the Meilisearch image ships neither curl nor wget, so a
-    # CMD healthcheck can't reliably probe /health. Dependents use
-    # service_started until 0.5 wires a real client-side readiness check.
+    volumes:
+      - meili_data:/meili_data
     networks:
       - sovecom
+
+  # One-shot migration service. Runs drizzle-kit migrate then exits 0.
+  # api depends_on this completing successfully before starting.
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+      target: builder
+    working_dir: /app/apps/api
+    command: sh -lc "npx drizzle-kit migrate --config=drizzle.config.ts && node dist/database/seed.js"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://sovecom:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/sovecom
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sovecom
+    restart: 'no'
 
   api:
     build:
@@ -43,11 +62,28 @@ services:
       NODE_ENV: production
       API_PORT: 3000
       DATABASE_URL: postgres://sovecom:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/sovecom
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
       MEILISEARCH_URL: http://meilisearch:7700
-      # The API reads MEILI_MASTER_KEY (search.service.ts) — keep the var name aligned so the
-      # configured key actually reaches it. Required-var syntax fails `compose up` fast when unset.
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?MEILI_MASTER_KEY must be set}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      MASTER_KEY: ${MASTER_KEY:?MASTER_KEY must be set}
+      STORAGE_SIGNING_SECRET: ${STORAGE_SIGNING_SECRET:?STORAGE_SIGNING_SECRET must be set}
+      AUDIT_EMAIL_SALT: ${AUDIT_EMAIL_SALT:?AUDIT_EMAIL_SALT must be set}
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      # Stripe (optional — stores without Stripe still boot)
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      # CORS allowlists for admin SPA and storefront
+      ADMIN_ORIGIN: https://admin.${SOVECOM_DOMAIN:-localhost}
+      STORE_ORIGIN: https://${SOVECOM_DOMAIN:-localhost}
+      # Local storage path (writable by nodejs user via named volume)
+      LOCAL_STORAGE_PATH: /data/uploads
+    volumes:
+      - uploads:/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,15 +91,26 @@ services:
         condition: service_healthy
       meilisearch:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     networks:
       - sovecom
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/health || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
 
   admin:
     build:
       context: .
       dockerfile: docker/Dockerfile.admin
+      args:
+        VITE_API_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - sovecom
 
@@ -71,8 +118,11 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.setup
+      args:
+        VITE_API_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - sovecom
 
@@ -80,19 +130,25 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.storefront
+      args:
+        NEXT_PUBLIC_API_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: http://api:3000
+      NEXT_PUBLIC_API_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - sovecom
 
   caddy:
     image: caddy:2
+    environment:
+      SOVECOM_DOMAIN: ${SOVECOM_DOMAIN:-localhost}
     ports:
       - '80:80'
       - '443:443'
+      - '443:443/udp'
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -105,10 +161,23 @@ services:
     networks:
       - sovecom
 
+  # MailHog - SMTP sink for setup wizard email OTP. Profile: verify
+  # Web UI: http://<host-ip>:8025
+  mailhog:
+    image: mailhog/mailhog:latest
+    profiles:
+      - verify
+    ports:
+      - '8025:8025'
+    networks:
+      - sovecom
+
 volumes:
   pgdata:
+  meili_data:
   caddy_data:
   caddy_config:
+  uploads:
 
 networks:
   sovecom:

@@ -1,27 +1,45 @@
-# Build stage
-FROM node:24.14.1-alpine AS builder
+# ── builder ─────────────────────────────────────────────────────────────────
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
+RUN npm install -g pnpm@11.4.0
+
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY tsconfig.base.json ./
+
+COPY packages/client-js/package.json       ./packages/client-js/package.json
+COPY packages/module-sdk/package.json      ./packages/module-sdk/package.json
+COPY packages/theme-sdk/package.json       ./packages/theme-sdk/package.json
+COPY packages/eslint-config/package.json   ./packages/eslint-config/package.json
+COPY packages/module-contract-tests/package.json ./packages/module-contract-tests/package.json
+COPY packages/theme-contract-tests/package.json  ./packages/theme-contract-tests/package.json
+COPY packages/create-sovecom-module/package.json ./packages/create-sovecom-module/package.json
+COPY packages/create-sovecom-theme/package.json  ./packages/create-sovecom-theme/package.json
+COPY apps/storefront-next/package.json ./apps/storefront-next/package.json
+
+RUN pnpm install --frozen-lockfile
+
 COPY packages/ ./packages/
 COPY apps/storefront-next/ ./apps/storefront-next/
 COPY brand/ ./brand/
 
-RUN npm install -g pnpm@11.4.0
-RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @sovecom/client-js build
+
+ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+ENV NODE_OPTIONS="--max-old-space-size=1536"
+
 RUN pnpm --filter @sovecom/storefront-next build
 
-# Production stage - Next.js standalone output
-FROM node:24.14.1-alpine AS production
+# ── production: Next.js standalone ──────────────────────────────────────────
+FROM node:24-alpine AS production
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3001
 
-# Copy standalone output
 COPY --from=builder /app/apps/storefront-next/.next/standalone/ ./
 COPY --from=builder /app/apps/storefront-next/.next/static/ ./apps/storefront-next/.next/static/
 COPY --from=builder /app/apps/storefront-next/public/ ./apps/storefront-next/public/
