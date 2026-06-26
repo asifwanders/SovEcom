@@ -18,8 +18,10 @@ import type { Request, Response } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/authenticated-user';
-import { StoreModuleCustomerAuthGuard } from '../customers/auth/store-module-customer-auth.guard';
-import type { AuthenticatedCustomer } from '../customers/auth/authenticated-customer';
+import {
+  StoreModuleCustomerAuthGuard,
+  type GuestAugmentedRequest,
+} from '../customers/auth/store-module-customer-auth.guard';
 import { RequirePermission } from '../authorization/decorators/require-permission.decorator';
 import { PERMISSIONS } from '../authorization/permissions.constants';
 import { StoreTenantService } from '../catalog/store-tenant.service';
@@ -99,7 +101,13 @@ export class ModulesProxyController {
     // StoreModuleCustomerAuthGuard from a JWT core verified itself). A client-supplied `customer`
     // in the body/query/headers can NEVER influence this — those never populate `req.customer`, and
     // the raw token is stripped below — so a module cannot be made to trust a spoofed identity.
-    const verifiedCustomer = (req as Request & { customer?: AuthenticatedCustomer }).customer;
+    // The customer and guestId principals are sourced EXCLUSIVELY from the guard-verified
+    // properties set by StoreModuleCustomerAuthGuard. Client-supplied identity in body/query/headers
+    // can NEVER influence either field. guestId is only passed when no customer is authenticated
+    // (customer always wins).
+    const augmented = req as GuestAugmentedRequest;
+    const verifiedCustomer = augmented.customer;
+    const resolvedGuestId = !verifiedCustomer && augmented.guestId ? augmented.guestId : undefined;
     const moduleReq: ModuleHttpRequest = {
       surface,
       tenantId,
@@ -109,6 +117,7 @@ export class ModulesProxyController {
       headers: sanitizeRequestHeaders(req.headers),
       body: serializeBody(req),
       customer: verifiedCustomer ? { id: verifiedCustomer.id } : undefined,
+      guestId: resolvedGuestId ? { id: resolvedGuestId } : undefined,
     };
     // handleHttp throws 404 (NotFoundException) if the module isn't enabled — let it propagate to
     // the global exception filter.

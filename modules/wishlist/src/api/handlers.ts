@@ -1,26 +1,36 @@
 /**
- * wishlist — the HTTP handlers behind `sdk.serve`.
+ * wishlist -- the HTTP handlers behind `sdk.serve`.
  *
  * Routes (mounted by core under `/store/v1/modules/wishlist/*`):
- *   POST   /items        body { productVariantId }  → add to the caller's wishlist
- *   DELETE /items/:id    (path = the product variant id)  → remove from the caller's wishlist
- *   GET    /items        → list the caller's wishlist, enriched with product info
+ *   POST   /items              body { productVariantId }  -> add to the caller's wishlist
+ *   DELETE /items/:id          (path = the product variant id)  -> remove
+ *   GET    /items              -> list the caller's wishlist, enriched with product info
+ *   POST   /items/:id/add      bodyless toggle alias (add)
+ *   POST   /items/:id/remove   bodyless toggle alias (remove)
+ *   GET    /slot?slot=&route=  -> slot DATA mount (toggle-button widget descriptor)
+ *   POST   /merge-guest        body { guestId } -> merge guest wishlist into customer wishlist
  *
- * CUSTOMER SCOPING (security): every route reads the buyer identity ONLY from `req.customer.id` —
- * the core-VERIFIED principal the store proxy set from a customer JWT it checked itself (3.10-i.5).
- * It is NEVER taken from the body, query, or headers. When `req.customer` is absent (anonymous /
- * no token) a write/read of personal data returns 401 — the module requires login.
- * Because the id is core-verified and every SQL statement binds it as a parameter, customer A can
- * never see or mutate customer B's items.
+ * IDENTITY (security): every route resolves the buyer identity via {@link resolveViewer}:
+ *   - Logged-in customers: `req.customer.id` (core-VERIFIED from JWT).
+ *   - Anonymous guests: `req.guestId.id` (core-VERIFIED from HMAC-signed sov_guest cookie).
+ * Neither is EVER taken from the request body, query, or headers. A module cannot be made
+ * to trust a spoofed identity.
  *
- * The handlers are pure over an injected SDK + repository, so they unit-test against a mocked SDK.
+ * GUEST WRITES: Guests may add/remove items from their guest wishlist. The data is stored
+ * separately in `mod_wishlist_guest_items` (not the customer table). On login, the storefront
+ * calls `POST /merge-guest` (with the customer's Bearer token) and the guest rows are migrated
+ * to the customer table (idempotent, dedupe-safe).
+ *
+ * The handlers are pure over an injected SDK + repository, so they unit-test against a
+ * mocked SDK.
  */
 import type { ModuleHttpRequest, ModuleHttpResponse, StoreClient } from '@sovecom/module-sdk';
 import type { WishlistRepository } from '../db/repository';
 import type { WishlistSettings } from '../settings';
+import { resolveViewer } from '../identity/viewer';
 import { handleWishlistSlot } from '../slot/wishlist-slot';
 
-/** JSON response helper — always declares a safe content-type (core re-asserts it anyway). */
+/** JSON response helper -- always declares a safe content-type (core re-asserts it anyway). */
 function json(status: number, body: unknown): ModuleHttpResponse {
   return {
     status,
@@ -29,7 +39,7 @@ function json(status: number, body: unknown): ModuleHttpResponse {
   };
 }
 
-/** A true bodyless 204 — RFC 7230 forbids a body (and thus a content-type) on a 204. */
+/** A true bodyless 204 -- RFC 7230 forbids a body (and thus a content-type) on a 204. */
 function noContent(): ModuleHttpResponse {
   return { status: 204 };
 }
@@ -47,9 +57,9 @@ function parseBody(req: ModuleHttpRequest): Record<string, unknown> | undefined 
 
 /**
  * Forbidden bytes in an id: any control char (C0 + DEL) or a path separator (`/`, `\`). A direct API
- * caller could POST `/items/%2Fetc%2Fpasswd/remove` → after decodeURIComponent the id would contain a
+ * caller could POST `/items/%2Fetc%2Fpasswd/remove` -- after decodeURIComponent the id would contain a
  * slash; SQL is parameterized so it is harmless TODAY, but a decoded id that smuggles a separator or a
- * control byte is never a legitimate product/variant id — reject it at the boundary. Hex escapes only.
+ * control byte is never a legitimate product/variant id -- reject it at the boundary. Hex escapes only.
  */
 // eslint-disable-next-line no-control-regex
 const FORBIDDEN_ID_CHARS = /[\x00-\x1f\x7f/\\]/;
@@ -67,8 +77,6 @@ function readId(value: unknown): string | undefined {
 function variantIdFromPath(path: string): string | undefined {
   const m = /^\/items\/([^/]+)\/?$/.exec(path);
   if (!m) return undefined;
-  // A malformed percent-escape (e.g. `/items/%zz`) makes decodeURIComponent throw URIError. Treat
-  // it as a non-match (→ 404) rather than letting it bubble to an unhandled 500.
   let decoded: string;
   try {
     decoded = decodeURIComponent(m[1]!);
@@ -80,9 +88,7 @@ function variantIdFromPath(path: string): string | undefined {
 
 /**
  * Match the path-based toggle aliases `POST /items/<id>/add` | `POST /items/<id>/remove` and return
- * `{ id, action }`. These back the `toggle-button` slot widget, which POSTs with no body — so
- * the product id rides in the path instead of the JSON body that `POST /items` uses. The DELETE
- * `/items/:id` remove is retained for non-widget callers.
+ * `{ id, action }`. These back the `toggle-button` slot widget, which POSTs with no body.
  */
 function toggleAliasFromPath(path: string): { id: string; action: 'add' | 'remove' } | undefined {
   const m = /^\/items\/([^/]+)\/(add|remove)\/?$/.exec(path);
@@ -106,23 +112,22 @@ export interface HandlerDeps {
 
 /**
  * Handle one mounted request. Returns the {@link ModuleHttpResponse} core will bound + serve.
- * Unmatched method/path → 404; disabled module → 404; anonymous on a customer route → 401.
+ * Unmatched method/path -> 404; disabled module -> 404.
  */
 export async function handleRequest(
   req: ModuleHttpRequest,
   deps: HandlerDeps,
 ): Promise<ModuleHttpResponse> {
-  // Feature flag: a disabled module behaves as if it had no endpoints.
   if (!deps.settings.enabled) return json(404, { error: 'not_found' });
 
   const path = req.path;
   const method = req.method.toUpperCase();
 
-  // POST /items — add (body { productVariantId })
+  // POST /items -- add (body { productVariantId })
   if (method === 'POST' && (path === '/items' || path === '/items/')) {
     return addItem(req, deps);
   }
-  // POST /items/:id/add | /items/:id/remove — bodyless toggle aliases (slot widget).
+  // POST /items/:id/add | /items/:id/remove -- bodyless toggle aliases (slot widget).
   if (method === 'POST') {
     const toggle = toggleAliasFromPath(path);
     if (toggle) {
@@ -130,16 +135,20 @@ export async function handleRequest(
         ? addItemById(req, deps, toggle.id)
         : removeItem(req, deps, toggle.id);
     }
+    // POST /merge-guest -- migrate a guest wishlist to the authenticated customer.
+    if (path === '/merge-guest' || path === '/merge-guest/') {
+      return mergeGuest(req, deps);
+    }
   }
-  // GET /items — list
+  // GET /items -- list
   if (method === 'GET' && (path === '/items' || path === '/items/')) {
     return listItems(req, deps);
   }
-  // GET /slot?slot=&route= — the slot DATA mount (toggle-button widget descriptor).
+  // GET /slot?slot=&route= -- the slot DATA mount (toggle-button widget descriptor).
   if (method === 'GET' && (path === '/slot' || path === '/slot/')) {
     return handleWishlistSlot(req, deps.repo);
   }
-  // DELETE /items/:variantId — remove
+  // DELETE /items/:variantId -- remove
   if (method === 'DELETE') {
     const variantId = variantIdFromPath(path);
     if (variantId) return removeItem(req, deps, variantId);
@@ -148,22 +157,11 @@ export async function handleRequest(
   return json(404, { error: 'not_found' });
 }
 
-/** The verified customer id for this request, or null when the caller is anonymous. */
-function requireCustomerId(req: ModuleHttpRequest): string | null {
-  const id = req.customer?.id;
-  return typeof id === 'string' && id.length > 0 ? id : null;
-}
-
 /**
- * The shared add path: idempotent, cap-gated. Used by both `POST /items` (body-supplied id) and the
- * bodyless toggle alias `POST /items/:id/add` (path-supplied id).
- *
- * NOTE (best-effort cap): this has()→count()→add() is check-then-act and NOT atomic — two concurrent
- * adds for the same customer can both pass the count gate and reach cap+1. That is an acceptable soft
- * cap for a wishlist; a hard cap would need DB-side enforcement. The UNIQUE(customer_id, variant)
- * constraint still prevents duplicate ROWS regardless of races.
+ * The shared add path for CUSTOMERS: idempotent, cap-gated.
+ * Used by both `POST /items` (body-supplied id) and the bodyless toggle alias `POST /items/:id/add`.
  */
-async function performAdd(
+async function performCustomerAdd(
   deps: HandlerDeps,
   customerId: string,
   productVariantId: string,
@@ -178,7 +176,6 @@ async function performAdd(
       });
     }
   }
-
   const row = await deps.repo.add(customerId, productVariantId);
   return json(already ? 200 : 201, {
     id: row.id,
@@ -187,9 +184,36 @@ async function performAdd(
   });
 }
 
+/**
+ * The shared add path for GUESTS: idempotent, cap-gated.
+ * Stores in `mod_wishlist_guest_items` (separate from customer items until merge-on-login).
+ */
+async function performGuestAdd(
+  deps: HandlerDeps,
+  guestId: string,
+  productVariantId: string,
+): Promise<ModuleHttpResponse> {
+  const already = await deps.repo.guestHas(guestId, productVariantId);
+  if (!already) {
+    const count = await deps.repo.countForGuest(guestId);
+    if (count >= deps.settings.maxItemsPerCustomer) {
+      return json(409, {
+        error: 'max_items_reached',
+        maxItemsPerCustomer: deps.settings.maxItemsPerCustomer,
+      });
+    }
+  }
+  const row = await deps.repo.guestAdd(guestId, productVariantId);
+  return json(already ? 200 : 201, {
+    id: row.id,
+    productVariantId: row.product_variant_id,
+    createdAt: row.created_at,
+  });
+}
+
 async function addItem(req: ModuleHttpRequest, deps: HandlerDeps): Promise<ModuleHttpResponse> {
-  const customerId = requireCustomerId(req);
-  if (!customerId) return json(401, { error: 'login_required' });
+  const viewer = resolveViewer(req);
+  if (viewer.kind === 'none') return json(401, { error: 'login_required' });
 
   const body = parseBody(req);
   const productVariantId = readId(body?.productVariantId);
@@ -197,18 +221,31 @@ async function addItem(req: ModuleHttpRequest, deps: HandlerDeps): Promise<Modul
     return json(400, { error: 'invalid_product_variant_id' });
   }
 
-  return performAdd(deps, customerId, productVariantId);
+  if (viewer.kind === 'customer') {
+    // Strip the 'cust:' prefix to get the raw customer id.
+    const customerId = req.customer!.id;
+    return performCustomerAdd(deps, customerId, productVariantId);
+  } else {
+    // viewer.kind === 'guest'
+    const guestId = req.guestId!.id;
+    return performGuestAdd(deps, guestId, productVariantId);
+  }
 }
 
-/** Bodyless toggle alias `POST /items/:id/add` — the id is path-supplied, already validated. */
+/** Bodyless toggle alias `POST /items/:id/add` -- the id is path-supplied, already validated. */
 async function addItemById(
   req: ModuleHttpRequest,
   deps: HandlerDeps,
   productVariantId: string,
 ): Promise<ModuleHttpResponse> {
-  const customerId = requireCustomerId(req);
-  if (!customerId) return json(401, { error: 'login_required' });
-  return performAdd(deps, customerId, productVariantId);
+  const viewer = resolveViewer(req);
+  if (viewer.kind === 'none') return json(401, { error: 'login_required' });
+
+  if (viewer.kind === 'customer') {
+    return performCustomerAdd(deps, req.customer!.id, productVariantId);
+  } else {
+    return performGuestAdd(deps, req.guestId!.id, productVariantId);
+  }
 }
 
 async function removeItem(
@@ -216,30 +253,69 @@ async function removeItem(
   deps: HandlerDeps,
   productVariantId: string,
 ): Promise<ModuleHttpResponse> {
-  const customerId = requireCustomerId(req);
-  if (!customerId) return json(401, { error: 'login_required' });
+  const viewer = resolveViewer(req);
+  if (viewer.kind === 'none') return json(401, { error: 'login_required' });
 
-  const removed = await deps.repo.remove(customerId, productVariantId);
+  let removed: boolean;
+  if (viewer.kind === 'customer') {
+    removed = await deps.repo.remove(req.customer!.id, productVariantId);
+  } else {
+    removed = await deps.repo.guestRemove(req.guestId!.id, productVariantId);
+  }
   return removed ? noContent() : json(404, { error: 'not_found' });
 }
 
 async function listItems(req: ModuleHttpRequest, deps: HandlerDeps): Promise<ModuleHttpResponse> {
-  const customerId = requireCustomerId(req);
-  if (!customerId) return json(401, { error: 'login_required' });
+  const viewer = resolveViewer(req);
+  if (viewer.kind === 'none') return json(401, { error: 'login_required' });
 
-  const rows = await deps.repo.list(customerId);
-  const items = await enrichItems(rows, deps.store);
-  return json(200, { items });
+  if (viewer.kind === 'customer') {
+    const rows = await deps.repo.list(req.customer!.id);
+    const items = await enrichCustomerItems(rows, deps.store);
+    return json(200, { items });
+  } else {
+    const rows = await deps.repo.guestList(req.guestId!.id);
+    const items = await enrichGuestItems(rows, deps.store);
+    return json(200, { items });
+  }
 }
 
 /**
- * Enrich stored rows with catalog info via the gated `sdk.store.products` read. The stored id is a
- * product VARIANT id; the catalog read surface is keyed by PRODUCT id, and the field-limited
- * `ModuleProductDto` carries no price (price is not exposed to modules). So enrichment is
- * best-effort: we attach what the store client returns and degrade gracefully when a product is
- * gone (deleted/unpublished) — the wishlist entry still lists with its variant id.
+ * POST /merge-guest -- Migrate a guest's wishlist to the authenticated customer.
+ *
+ * SECURITY: this endpoint REQUIRES a verified customer (Bearer JWT). The guestId to merge
+ * is read from `req.guestId` (the core-derived guest identity from the sov_guest cookie) --
+ * never from the request body. This prevents a customer from merging an arbitrary guest's
+ * data by supplying a different guestId.
+ *
+ * The storefront calls this immediately after login succeeds (before the next module request),
+ * passing its current sov_guest cookie along (credentials:'include'). After the merge, the
+ * storefront's subsequent module requests will use the customer's Bearer token and the guest
+ * wishlist rows will have been migrated to the customer table.
  */
-async function enrichItems(
+async function mergeGuest(req: ModuleHttpRequest, deps: HandlerDeps): Promise<ModuleHttpResponse> {
+  // Must be a logged-in customer to merge.
+  const customerId = req.customer?.id;
+  if (typeof customerId !== 'string' || customerId.length === 0) {
+    return json(401, { error: 'login_required' });
+  }
+
+  // The guestId comes from the core-verified sov_guest cookie (NOT from the body).
+  const guestId = req.guestId?.id;
+  if (typeof guestId !== 'string' || guestId.length === 0) {
+    // No guest cookie present -- nothing to merge. Return 200 (idempotent).
+    return json(200, { merged: 0 });
+  }
+
+  const merged = await deps.repo.mergeGuestToCustomer(guestId, customerId);
+  return json(200, { merged });
+}
+
+/**
+ * Enrich customer wishlist rows with catalog info via the gated `read:products` surface.
+ * Best-effort: a deleted/unpublished product degrades to `product: null`.
+ */
+async function enrichCustomerItems(
   rows: ReadonlyArray<{ id: string; product_variant_id: string; created_at: string }>,
   store: StoreClient,
 ): Promise<
@@ -259,7 +335,6 @@ async function enrichItems(
           product = { id: dto.id, slug: dto.slug, title: dto.title, status: dto.status };
         }
       } catch {
-        // A failed enrichment must never drop the wishlist entry — leave product null.
         product = null;
       }
       return {
@@ -270,4 +345,22 @@ async function enrichItems(
       };
     }),
   );
+}
+
+/**
+ * Enrich guest wishlist rows with catalog info. Same best-effort behaviour as customer
+ * enrichment.
+ */
+async function enrichGuestItems(
+  rows: ReadonlyArray<{ id: string; product_variant_id: string; created_at: string }>,
+  store: StoreClient,
+): Promise<
+  Array<{
+    id: string;
+    productVariantId: string;
+    createdAt: string;
+    product: { id: string; slug: string; title: string; status: string } | null;
+  }>
+> {
+  return enrichCustomerItems(rows, store);
 }

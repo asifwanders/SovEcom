@@ -7,7 +7,7 @@ import type { ModuleHttpRequest, ModuleHttpResponse } from '@sovecom/module-sdk'
 import { handleRequest, type HandlerDeps } from '../src/api/handlers';
 import { RecentlyViewedRepository } from '../src/db/repository';
 import { resolveSettings, type RecentlyViewedSettings } from '../src/settings';
-import { MIN_GUEST_TOKEN_LEN, CUSTOMER_KEY_PREFIX, GUEST_KEY_PREFIX } from '../src/identity/viewer';
+import { CUSTOMER_KEY_PREFIX, GUEST_KEY_PREFIX } from '../src/identity/viewer';
 import {
   excludeNothingResolver,
   type ProductCategoryResolver,
@@ -47,7 +47,7 @@ function req(partial: Partial<ModuleHttpRequest>): ModuleHttpRequest {
 }
 
 const CUST = { id: 'cust-1' };
-const GUEST = 'g'.repeat(MIN_GUEST_TOKEN_LEN);
+const GUEST_ID = { id: 'guest-uuid-abc' };
 
 async function body(res: ModuleHttpResponse): Promise<Record<string, unknown>> {
   return res.body ? (JSON.parse(res.body) as Record<string, unknown>) : {};
@@ -73,7 +73,7 @@ async function postView(
 }
 
 describe('recently-viewed handlers — record view (POST /views)', () => {
-  it('anonymous (no customer, no token) → 401 login_required', async () => {
+  it('anonymous (no customer, no guestId) → 401 login_required', async () => {
     const { deps } = makeDeps();
     const res = await postView(deps, undefined, 'prod-1');
     expect(res.status).toBe(401);
@@ -92,14 +92,30 @@ describe('recently-viewed handlers — record view (POST /views)', () => {
     });
   });
 
-  it('a guest with a high-entropy token → 204, stored under the token key', async () => {
+  it('a guest via core-derived guestId → 204, stored under the guest: key', async () => {
     const { deps, tables } = makeDeps();
-    const res = await postView(deps, undefined, 'prod-1', { query: { guest: GUEST } });
+    const res = await postView(deps, undefined, 'prod-1', { guestId: GUEST_ID });
     expect(res.status).toBe(204);
     expect(tables.views[0]).toMatchObject({
-      viewer_key: `${GUEST_KEY_PREFIX}${GUEST}`,
+      viewer_key: `${GUEST_KEY_PREFIX}${GUEST_ID.id}`,
       product_id: 'prod-1',
     });
+  });
+
+  it('x-rv-guest header is IGNORED — client-supplied guest tokens are no longer accepted', async () => {
+    // Old scheme: the storefront supplied a token via x-rv-guest header. Now that path is removed;
+    // without a real guestId cookie the request is anonymous → 401.
+    const { deps } = makeDeps();
+    const res = await postView(deps, undefined, 'prod-1', {
+      headers: { 'x-rv-guest': 'a'.repeat(32) },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('?guest= query param is IGNORED — client-supplied guest tokens are no longer accepted', async () => {
+    const { deps } = makeDeps();
+    const res = await postView(deps, undefined, 'prod-1', { query: { guest: 'a'.repeat(32) } });
+    expect(res.status).toBe(401);
   });
 
   it('invalid productId → 400 invalid_product_id', async () => {
@@ -220,6 +236,14 @@ describe('recently-viewed handlers — list recent (GET /recent)', () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ productId: 'p1', product: null });
   });
+
+  it('a guest reads their own history via core-derived guestId', async () => {
+    const { deps } = makeDeps();
+    await postView(deps, undefined, 'g-prod', { guestId: GUEST_ID });
+    const res = await handleRequest(req({ path: '/recent', guestId: GUEST_ID }), deps);
+    const items = (await body(res)).items as Array<{ productId: string }>;
+    expect(items.map((i) => i.productId)).toEqual(['g-prod']);
+  });
 });
 
 describe('recently-viewed handlers — per-viewer isolation', () => {
@@ -238,17 +262,124 @@ describe('recently-viewed handlers — per-viewer isolation', () => {
     );
   });
 
-  it('a guest only ever sees their own token-scoped history', async () => {
+  it('a guest only ever sees their own guestId-scoped history', async () => {
     const { deps } = makeDeps();
-    const g1 = 'a'.repeat(MIN_GUEST_TOKEN_LEN);
-    const g2 = 'b'.repeat(MIN_GUEST_TOKEN_LEN);
-    await postView(deps, undefined, 'g1-prod', { query: { guest: g1 } });
-    await postView(deps, undefined, 'g2-prod', { query: { guest: g2 } });
+    const g1 = { id: 'guest-id-1' };
+    const g2 = { id: 'guest-id-2' };
+    await postView(deps, undefined, 'g1-prod', { guestId: g1 });
+    await postView(deps, undefined, 'g2-prod', { guestId: g2 });
 
-    const r1 = await handleRequest(req({ path: '/recent', query: { guest: g1 } }), deps);
+    const r1 = await handleRequest(req({ path: '/recent', guestId: g1 }), deps);
     expect(
       ((await body(r1)).items as Array<{ productId: string }>).map((i) => i.productId),
     ).toEqual(['g1-prod']);
+  });
+
+  it('a customer and a guest with the same raw id cannot cross-read (namespace isolation)', async () => {
+    const { deps } = makeDeps();
+    const sharedRawId = 'shared-raw-id-xyz';
+    // Record a view as a customer with that id.
+    await postView(deps, { id: sharedRawId }, 'cust-prod');
+    // Record a different view as a guest with the same raw id.
+    await postView(deps, undefined, 'guest-prod', { guestId: { id: sharedRawId } });
+
+    // The customer sees only their product.
+    const custRes = await handleRequest(
+      req({ path: '/recent', customer: { id: sharedRawId } }),
+      deps,
+    );
+    const custItems = ((await body(custRes)).items as Array<{ productId: string }>).map(
+      (i) => i.productId,
+    );
+    expect(custItems).toEqual(['cust-prod']);
+
+    // The guest sees only their product.
+    const guestRes = await handleRequest(
+      req({ path: '/recent', guestId: { id: sharedRawId } }),
+      deps,
+    );
+    const guestItems = ((await body(guestRes)).items as Array<{ productId: string }>).map(
+      (i) => i.productId,
+    );
+    expect(guestItems).toEqual(['guest-prod']);
+  });
+});
+
+describe('recently-viewed handlers — merge-guest (POST /merge-guest)', () => {
+  async function postMergeGuest(
+    deps: HandlerDeps,
+    customer: { id: string } | undefined,
+    guestId: { id: string } | undefined,
+  ): Promise<ModuleHttpResponse> {
+    return handleRequest(req({ method: 'POST', path: '/merge-guest', customer, guestId }), deps);
+  }
+
+  it('no customer (anonymous) → 401 login_required', async () => {
+    const { deps } = makeDeps();
+    const res = await postMergeGuest(deps, undefined, GUEST_ID);
+    expect(res.status).toBe(401);
+    expect(await body(res)).toEqual({ error: 'login_required' });
+  });
+
+  it('customer present but no guestId cookie → 200 { merged: 0 } (idempotent)', async () => {
+    const { deps } = makeDeps();
+    const res = await postMergeGuest(deps, CUST, undefined);
+    expect(res.status).toBe(200);
+    expect(await body(res)).toEqual({ merged: 0 });
+  });
+
+  it('migrates guest history to the customer key space', async () => {
+    const { deps, tables } = makeDeps();
+    // Record two views as a guest.
+    await postView(deps, undefined, 'g-prod-1', { guestId: GUEST_ID });
+    await postView(deps, undefined, 'g-prod-2', { guestId: GUEST_ID });
+    expect(tables.views).toHaveLength(2);
+
+    // Merge.
+    const res = await postMergeGuest(deps, CUST, GUEST_ID);
+    expect(res.status).toBe(200);
+    expect((await body(res)).merged).toBe(2);
+
+    // All rows should now be under the customer key, none under the guest key.
+    const custKey = `${CUSTOMER_KEY_PREFIX}${CUST.id}`;
+    const guestKey = `${GUEST_KEY_PREFIX}${GUEST_ID.id}`;
+    expect(tables.views.every((r) => r.viewer_key === custKey)).toBe(true);
+    expect(tables.views.some((r) => r.viewer_key === guestKey)).toBe(false);
+  });
+
+  it('merge is idempotent — duplicate products in both keys are deduped (not doubled)', async () => {
+    const { deps, tables } = makeDeps();
+    // The customer already viewed prod-X.
+    await postView(deps, CUST, 'prod-X');
+    // The guest also viewed prod-X, plus prod-Y.
+    await postView(deps, undefined, 'prod-X', { guestId: GUEST_ID });
+    await postView(deps, undefined, 'prod-Y', { guestId: GUEST_ID });
+    expect(tables.views).toHaveLength(3);
+
+    // Merge.
+    const res = await postMergeGuest(deps, CUST, GUEST_ID);
+    expect(res.status).toBe(200);
+
+    // After merge: only 2 rows remain (prod-X deduped, prod-Y added), no guest rows.
+    const custKey = `${CUSTOMER_KEY_PREFIX}${CUST.id}`;
+    const custViews = tables.views.filter((r) => r.viewer_key === custKey);
+    expect(custViews.map((r) => r.product_id).sort()).toEqual(['prod-X', 'prod-Y']);
+    expect(tables.views.some((r) => r.viewer_key.startsWith('guest:'))).toBe(false);
+  });
+
+  it('after merge the guest list is empty and the customer list has the migrated items', async () => {
+    const { deps } = makeDeps();
+    await postView(deps, undefined, 'g-prod', { guestId: GUEST_ID });
+    await postMergeGuest(deps, CUST, GUEST_ID);
+
+    // Guest list is empty.
+    const guestList = await handleRequest(req({ path: '/recent', guestId: GUEST_ID }), deps);
+    expect(((await body(guestList)).items as unknown[]).length).toBe(0);
+
+    // Customer list has the merged item.
+    const custList = await handleRequest(req({ path: '/recent', customer: CUST }), deps);
+    const custItems = (await body(custList)).items as Array<{ productId: string }>;
+    expect(custItems.map((i) => i.productId)).toContain('g-prod');
   });
 });
 

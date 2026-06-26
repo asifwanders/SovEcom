@@ -32,7 +32,7 @@ import React, {
   useState,
 } from 'react';
 import { SovEcomApiError, type SovEcomClient } from '@sovecom/client-js';
-import { createBrowserClient } from './browser-client';
+import { createBrowserClient, apiBaseUrl } from './browser-client';
 
 /** The authenticated customer view the storefront renders. Subset of the API `StoreCustomerView`. */
 export interface AuthCustomer {
@@ -222,6 +222,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     };
   }, [refresh, loadProfile]);
 
+  /**
+   * Fire-and-forget guest wishlist merge: after login, migrate the sov_guest cookie's wishlist
+   * items into the customer's wishlist. The sov_guest cookie rides automatically via
+   * credentials:'include' (httpOnly, same-site). The Bearer token must be in-memory already.
+   * Failures are silently swallowed -- a failed merge does not abort the login flow; the guest
+   * items remain in the guest table and can be retried, or lost on cookie expiry.
+   */
+  const mergeGuestWishlist = useCallback((accessToken: string): void => {
+    void fetch(`${apiBaseUrl}/store/v1/modules/wishlist/merge-guest`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    }).catch(() => {
+      // Silently swallow -- merge failure must never break the login flow.
+    });
+  }, []);
+
+  /**
+   * Fire-and-forget guest recently-viewed merge: after login, migrate the sov_guest cookie's
+   * recently-viewed history into the customer's history. The sov_guest cookie rides automatically
+   * via credentials:'include' (httpOnly, same-site). The Bearer token must be in-memory already.
+   * Failures are silently swallowed -- a failed merge does not abort the login flow; the guest
+   * history remains in the guest key space and can be retried, or expires with the cookie.
+   */
+  const mergeGuestRecentlyViewed = useCallback((accessToken: string): void => {
+    void fetch(`${apiBaseUrl}/store/v1/modules/recently-viewed/merge-guest`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    }).catch(() => {
+      // Silently swallow -- merge failure must never break the login flow.
+    });
+  }, []);
+
   const login = useCallback(
     async (email: string, password: string): Promise<void> => {
       const res = await client.request<
@@ -230,9 +266,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
         { accessToken: string }
       >('post', '/store/v1/customers/login', { body: { email, password } });
       setToken(res.accessToken);
+      // Merge guest module data into the customer's records before loading the profile
+      // so the UI sees merged data on the first render after login.
+      mergeGuestWishlist(res.accessToken);
+      mergeGuestRecentlyViewed(res.accessToken);
       await loadProfile();
     },
-    [client, setToken, loadProfile],
+    [client, setToken, loadProfile, mergeGuestWishlist, mergeGuestRecentlyViewed],
   );
 
   const register = useCallback(

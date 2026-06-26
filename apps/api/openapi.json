@@ -7421,7 +7421,9 @@
             "minLength": 1,
             "maxLength": 255,
             "x-nestjs_zod-uses-3-point-1-syntax": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Full name of the recipient",
+            "example": "Marie Dupont"
           },
           "company": {
             "anyOf": [
@@ -7436,14 +7438,18 @@
             ],
             "x-nestjs_zod-uses-3-point-1-syntax": true,
             "x-nestjs_zod-empty-type": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Company name (optional)",
+            "example": "Acme Inc."
           },
           "line1": {
             "type": "string",
             "minLength": 1,
             "maxLength": 512,
             "x-nestjs_zod-uses-3-point-1-syntax": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Street address (first line)",
+            "example": "12 Rue de Rivoli"
           },
           "line2": {
             "anyOf": [
@@ -7458,21 +7464,27 @@
             ],
             "x-nestjs_zod-uses-3-point-1-syntax": true,
             "x-nestjs_zod-empty-type": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Street address (second line, e.g. apt/suite)",
+            "example": "Apartment 3"
           },
           "city": {
             "type": "string",
             "minLength": 1,
             "maxLength": 255,
             "x-nestjs_zod-uses-3-point-1-syntax": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "City name",
+            "example": "Paris"
           },
           "postalCode": {
             "type": "string",
             "minLength": 1,
             "maxLength": 32,
             "x-nestjs_zod-uses-3-point-1-syntax": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Postal code",
+            "example": "75001"
           },
           "region": {
             "anyOf": [
@@ -7487,13 +7499,17 @@
             ],
             "x-nestjs_zod-uses-3-point-1-syntax": true,
             "x-nestjs_zod-empty-type": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "State, province, or region (optional)",
+            "example": "Île-de-France"
           },
           "country": {
             "type": "string",
             "pattern": "^[A-Za-z]{2}$",
             "x-nestjs_zod-uses-3-point-1-syntax": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Country code (ISO 3166-1 alpha-2, two uppercase letters)",
+            "example": "FR"
           },
           "phone": {
             "anyOf": [
@@ -7508,7 +7524,9 @@
             ],
             "x-nestjs_zod-uses-3-point-1-syntax": true,
             "x-nestjs_zod-empty-type": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Phone number (optional)",
+            "example": "+33 1 2345 6789"
           }
         },
         "required": [

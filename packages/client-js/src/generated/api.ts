@@ -2782,14 +2782,50 @@ export interface components {
             quantity: number;
         };
         SetAddressDto: {
+            /**
+             * @description Full name of the recipient
+             * @example Marie Dupont
+             */
             name: string;
+            /**
+             * @description Company name (optional)
+             * @example Acme Inc.
+             */
             company?: string | null;
+            /**
+             * @description Street address (first line)
+             * @example 12 Rue de Rivoli
+             */
             line1: string;
+            /**
+             * @description Street address (second line, e.g. apt/suite)
+             * @example Apartment 3
+             */
             line2?: string | null;
+            /**
+             * @description City name
+             * @example Paris
+             */
             city: string;
+            /**
+             * @description Postal code
+             * @example 75001
+             */
             postalCode: string;
+            /**
+             * @description State, province, or region (optional)
+             * @example Île-de-France
+             */
             region?: string | null;
+            /**
+             * @description Country code (ISO 3166-1 alpha-2, two uppercase letters)
+             * @example FR
+             */
             country: string;
+            /**
+             * @description Phone number (optional)
+             * @example +33 1 2345 6789
+             */
             phone?: string | null;
         };
         SetShippingMethodDto: {

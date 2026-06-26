@@ -7,6 +7,7 @@
  */
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 // ── Address sub-schema (shared for shipping + billing) ────────────────────────
 
@@ -69,7 +70,75 @@ export class UpdateCartItemDto extends createZodDto(UpdateCartItemSchema) {}
 // ── Set address ───────────────────────────────────────────────────────────────
 
 export const SetAddressSchema = AddressSchema;
-export class SetAddressDto extends createZodDto(SetAddressSchema) {}
+
+/**
+ * Address DTO (shared for both shipping and billing).
+ * Used in POST /store/v1/carts/:id/shipping-address and /billing-address.
+ */
+export class SetAddressDto extends createZodDto(SetAddressSchema) {
+  @ApiProperty({
+    type: 'string',
+    description: 'Full name of the recipient',
+    example: 'Marie Dupont',
+  })
+  declare name: string;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    description: 'Company name (optional)',
+    example: 'Acme Inc.',
+  })
+  declare company?: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    description: 'Street address (first line)',
+    example: '12 Rue de Rivoli',
+  })
+  declare line1: string;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    description: 'Street address (second line, e.g. apt/suite)',
+    example: 'Apartment 3',
+  })
+  declare line2?: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    description: 'City name',
+    example: 'Paris',
+  })
+  declare city: string;
+
+  @ApiProperty({
+    type: 'string',
+    description: 'Postal code',
+    example: '75001',
+  })
+  declare postalCode: string;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    description: 'State, province, or region (optional)',
+    example: 'Île-de-France',
+  })
+  declare region?: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    description: 'Country code (ISO 3166-1 alpha-2, two uppercase letters)',
+    example: 'FR',
+  })
+  declare country: string;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    description: 'Phone number (optional)',
+    example: '+33 1 2345 6789',
+  })
+  declare phone?: string | null;
+}
 
 // ── Set shipping method ───────────────────────────────────────────────────────
 

@@ -21,45 +21,32 @@ exclusion" below for why it would not help anyway.)
 A recently-viewed history is **per viewer**. The module resolves the viewer key from exactly two
 honest, non-overlapping sources (`src/identity/viewer.ts`):
 
-1. **Account (primary, fully supported).** A logged-in shopper. The viewer key is the
-   **core-verified** `req.customer.id` — set by core from a customer JWT it verified itself. It is
-   **never** read from the body/query/headers. This is the secure, per-customer path the integration
-   suite drives end-to-end.
+1. **Account (primary).** A logged-in shopper. The viewer key is the **core-verified**
+   `req.customer.id` — set by core from a customer JWT it verified itself. Never read from the
+   body, query, or headers.
 
-2. **Guest (opt-in, storefront-managed).** An anonymous shopper. **Guest cookies are a storefront concern** — the sandboxed module does not and must
-   not manage storefront cookies. So instead of inventing an insecure scheme, the module accepts an
-   **opaque, high-entropy guest token the storefront supplies**. The token **is** the viewer key.
+2. **Guest (anonymous).** An anonymous shopper. The viewer key is the **core-derived**
+   `req.guestId.id` — set by core's store-module auth guard from a signed, tenant-scoped
+   `sov_guest` httpOnly cookie that the API minted (HMAC-SHA256). It is **never** read from
+   client input (body/header/query). The storefront sends `credentials: 'include'` so the cookie
+   travels automatically.
 
-   **Send it in the `x-rv-guest` HEADER.** The shipped slot component does exactly that. The server
-   also accepts `?guest=` as a documented **last resort**, but a query-string token leaks via access
-   logs, the `Referer` header, and browser history (no secrets in URL/query/logs), so a correct
-   client uses the header.
-
-   Recently-viewed history is **low-sensitivity** (not PII), but the module still must never let one
-   guest read another's by a guessable id. So it requires the token to clear a length floor
-   (`MIN_GUEST_TOKEN_LEN`, 16 chars) **and** carry no control characters — a short/empty/control-char
-   token is **rejected**, never silently shared. The storefront is expected to mint a real
-   high-entropy value (e.g. a 128-bit random, base64url).
-
-A verified customer **always wins** over any supplied guest token (you cannot impersonate by sending
-a guest token while logged in). When neither yields a usable key there is **no viewer**: a write
-returns `401`, a read returns an empty list (a read leaks nothing).
+A verified customer **always wins** over a present `guestId` (you cannot impersonate by sending a
+guest cookie while authenticated). When neither yields a key there is **no viewer**: a write returns
+`401`, a read returns an empty list.
 
 ### Key namespacing (no customer/guest collision)
 
-The customer id and the guest token share the one `viewer_key` column, so the resolved key is
-**namespace-prefixed by kind**: a customer → `cust:<id>`, a guest → `guest:<token>`. Without this a
-guest could supply `?guest=<a known customer's UUID>` (≥16 chars → accepted) and the raw key would
-**collide** with that customer's, reading + polluting their history. The prefixes make the two key
-spaces disjoint by construction — `cust:<id>` can never equal `guest:<token>` — so a guest token,
-whatever string it is, can never address a customer. Proven on real PG (`int-spec`: the
-"namespace collision guard" case).
+The `viewer_key` column stores both customer and guest keys. Each is **namespace-prefixed** by kind:
+`cust:<customerId>` or `guest:<guestId>`. The prefixes make the two key spaces disjoint by
+construction — a guest id, whatever UUID it is, can never accidentally address a customer's history.
 
-### Guest-cookie deferral
+### Merge on login
 
-**Minting, storing, and rotating the guest cookie is the storefront's job.** This module only
-consumes whatever opaque token the host forwards. Guest tracking works for any caller that supplies a
-valid high-entropy token; account-based tracking works fully today.
+When a guest logs in, the storefront calls `POST /merge-guest` (with the customer's Bearer token and
+`credentials: 'include'`). The endpoint reads `req.guestId` from the signed cookie — **never from
+the request body** — and migrates the guest's views into the customer's key space (idempotent,
+dedupe-safe). The storefront fires this alongside the wishlist merge in `auth-context.tsx`.
 
 ## Endpoints (store surface only)
 
@@ -67,17 +54,21 @@ This module has **no admin surface** — the feature is entirely store-facing. C
 `/store/v1/modules/recently-viewed/*` here.
 
 - `POST /store/v1/modules/recently-viewed/views` — body `{ productId }`. Records (or refreshes) a
-  view for the viewer. Requires a viewer (`401 login_required` when anonymous with no token).
-  Validates `productId`. **Dedupe + bump:** re-viewing the same product never adds a second row — it
-  moves the existing row to the top (newest) via `ON CONFLICT (viewer_key, product_id) DO UPDATE SET
-viewed_at = now()`. Returns `204`. (When `verifyProductExists` is enabled, an unknown product is a
-  `404 product_not_found`; off by default — recording a view is a cheap signal and a stale id simply
-  never enriches on read.)
+  view for the viewer. Requires a viewer (`401 login_required` when neither a customer JWT nor a
+  sov_guest cookie is present). Validates `productId`. **Dedupe + bump:** re-viewing the same product
+  never adds a second row — it moves the existing row to the top (newest) via
+  `ON CONFLICT (viewer_key, product_id) DO UPDATE SET viewed_at = now()`. Returns `204`. (When
+  `verifyProductExists` is enabled, an unknown product is a `404 product_not_found`; off by default.)
 - `GET /store/v1/modules/recently-viewed/recent?exclude=<id>` — the viewer's most-recently-viewed
   products, **newest first**, capped at `maxItems`, excluding the optional `?exclude` product (the
   one currently on screen) and any product in an excluded category. Each item is enriched via
   `read:products` (best-effort: a gone/unpublished product degrades to `product: null`, never dropped).
   An unresolved viewer gets `200` with an empty list.
+- `POST /store/v1/modules/recently-viewed/merge-guest` — migrates the sov_guest cookie's
+  recently-viewed history into the authenticated customer's history. Requires a valid customer Bearer
+  token. The guest identity is read from `req.guestId` (the signed cookie) — **never from the request
+  body**. Idempotent; returns `{ merged: N }` where N is the number of products migrated. The
+  storefront calls this immediately after login (alongside the wishlist merge).
 
 ## Per-viewer isolation
 
@@ -138,15 +129,13 @@ GET /store/v1/modules/recently-viewed/slot?slot=home-page-bottom&route=/
 
 It maps to the storefront's MIT **`product-carousel`** widget (READ-ONLY). The handler
 ([`src/slot/recently-viewed-slot.ts`](src/slot/recently-viewed-slot.ts)) resolves the visitor with the
-existing identity seam (core-verified `req.customer.id`, else the high-entropy `x-rv-guest` token — so it
-is **visitor-scoped**), enriches the recent products via the gated `read:products` read, and returns
+existing identity seam (core-verified `req.customer.id` for a logged-in shopper, else the core-derived
+`req.guestId.id` from the sov_guest cookie — so it is **visitor-scoped**), enriches the recent products
+via the gated `read:products` read, and returns
 `{ type: 'product-carousel', props: { items: [{ productId, slug, title }] } }`, capped at ≤24 items. No
 resolvable visitor / empty history / unknown slot → **204** (decline). The storefront validates the body
 with `parseWidget` and renders its OWN component — **no module code/HTML ever enters the storefront
 bundle**.
-
-> The guest token is still supplied by the storefront in the `x-rv-guest` HEADER (never the query
-> string); minting/rotating that cookie remains the storefront's job.
 
 ## Storage
 
@@ -158,15 +147,16 @@ the module's low-privilege DB role — it can never touch a core table.
 
 ## Tests
 
-- **Unit** (`test/`, mocked SDK): settings clamping; identity resolution (account/guest/none, token
-  floor, customer-wins); category-filter seam; handlers — record/dedupe/bump, validation,
-  guest+account, newest-first/cap/`?exclude`/`excludeCategories`, enrichment degrade, per-viewer
-  isolation, routing (disabled → 404, admin surface → 404).
+- **Unit** (`test/`, mocked SDK): settings clamping; identity resolution (account/guest via
+  `req.guestId`/none, customer-wins, namespace isolation, x-rv-guest/query-guest ignored);
+  category-filter seam; handlers — record/dedupe/bump, validation, guest+account, newest-first/cap/
+  `?exclude`/`excludeCategories`, enrichment degrade, per-viewer isolation (customer↔customer,
+  guest↔guest, cross-namespace isolation), merge-guest (no-customer→401, no-cookie→0,
+  migrates+deletes, dedupes, after-merge isolation), routing (disabled→404, admin→404).
 - **Integration** (`apps/api/test/integration/modules/recently-viewed.int-spec.ts`, real Postgres):
   install → migrate → POST views as an authenticated customer over the real broker → GET recent
-  (newest-first, capped, deduped, enriched); per-viewer isolation (customer↔customer, guest↔customer,
-  guest↔guest); `excludeCategories` filter via the seam; `?exclude`; anonymous handling; unknown
-  product (`read:products` end-to-end); migration; `write:own_tables` enforcement.
+  (newest-first, capped, deduped, enriched); per-viewer isolation; `excludeCategories`; `?exclude`;
+  anonymous handling; merge-guest end-to-end; `write:own_tables` enforcement.
 - `module-contract-tests .` passes (manifest valid, tables namespaced, permissions sufficient,
   core-version compatible).
 

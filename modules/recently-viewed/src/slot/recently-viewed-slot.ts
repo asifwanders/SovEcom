@@ -5,16 +5,16 @@
  * and renders its own `product-carousel` component.
  *
  * VISITOR-SCOPED + READ-ONLY: it resolves the visitor through the module's existing identity seam
- * ({@link resolveViewer} — the core-verified `req.customer.id`, else the high-entropy `x-rv-guest`
- * token), reads that visitor's recent products, enriches them via the gated `read:products` surface,
- * and maps to a `product-carousel`. A product that no longer enriches (deleted/unpublished) is DROPPED
- * (a bad card is never emitted). The descriptor is bounded to the C1 carousel cap
- * ({@link CAROUSEL_MAX_ITEMS}).
+ * ({@link resolveViewer} — the core-verified `req.customer.id` for a logged-in shopper, else the
+ * core-derived `req.guestId.id` from the signed sov_guest cookie for a guest), reads that visitor's
+ * recent products, enriches them via the gated `read:products` surface, and maps to a
+ * `product-carousel`. A product that no longer enriches (deleted/unpublished) is DROPPED (a bad
+ * card is never emitted). The descriptor is bounded to the C1 carousel cap ({@link CAROUSEL_MAX_ITEMS}).
  *
  * Fail-closed: an unknown slot, no resolvable visitor, or an empty history ⇒ 204 (decline). The
  * personalized vs. read-only split is the storefront's call; this carousel is treated by C2 as a
- * READ-ONLY widget — it carries no per-customer state beyond the visitor's own history and is
- * route-keyed by the visitor token the storefront supplies. No PII (no email/name) ever crosses.
+ * READ-ONLY widget — it carries no per-customer state beyond the visitor's own history. No PII
+ * (no email/name) ever crosses.
  */
 import type { ModuleHttpRequest, ModuleHttpResponse } from '@sovecom/module-sdk';
 import type { StoreClient } from '@sovecom/module-sdk';

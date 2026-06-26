@@ -4,13 +4,14 @@
  * Routes (mounted by core under `/store/v1/modules/recently-viewed/*`):
  *   POST /views          body { productId }       → record/refresh a view for the viewer
  *   GET  /recent         ?exclude=<id>            → the viewer's most-recently-viewed products
+ *   POST /merge-guest                             → migrate guest history to the logged-in customer
  *
  * VIEWER SCOPING (security): every route resolves the viewer ONLY via {@link resolveViewer} — the
- * core-VERIFIED `req.customer.id` for a logged-in shopper, else a high-entropy storefront-supplied
- * guest token. The viewer key is NEVER taken from a free body field. Because every SQL statement
- * binds that key as `viewer_key`, viewer A can never see or mutate viewer B's history. When no
- * viewer can be resolved, a write returns 401 and a read returns an empty list.
- * See README "Guest identity" for details.
+ * core-VERIFIED `req.customer.id` for a logged-in shopper, else the core-VERIFIED `req.guestId.id`
+ * from the signed sov_guest httpOnly cookie. The viewer key is NEVER taken from a free body field,
+ * query, or header. Because every SQL statement binds that key as `viewer_key`, viewer A can never
+ * see or mutate viewer B's history. When no viewer can be resolved, a write returns 401 and a read
+ * returns an empty list. See README "Guest identity" for details.
  *
  * The handlers are pure over an injected SDK + repository + seams, so they unit-test against a
  * mocked SDK.
@@ -107,6 +108,10 @@ export async function handleRequest(
   if (method === 'POST' && (path === '/views' || path === '/views/')) {
     return recordView(req, deps);
   }
+  // POST /merge-guest — migrate guest history to the authenticated customer.
+  if (method === 'POST' && (path === '/merge-guest' || path === '/merge-guest/')) {
+    return mergeGuest(req, deps);
+  }
   // GET /recent — list the viewer's recently viewed products
   if (method === 'GET' && (path === '/recent' || path === '/recent/')) {
     return listRecent(req, deps);
@@ -178,6 +183,36 @@ async function listRecent(req: ModuleHttpRequest, deps: HandlerDeps): Promise<Mo
 
   const items = await enrich(kept, deps.products);
   return json(200, { items });
+}
+
+/**
+ * POST /merge-guest — Migrate a guest's recently-viewed history to the authenticated customer.
+ *
+ * SECURITY: this endpoint REQUIRES a verified customer (Bearer JWT). The guestId to merge is
+ * read from `req.guestId` (the core-derived guest identity from the sov_guest cookie) — NEVER
+ * from the request body. This prevents a customer from merging an arbitrary guest's data by
+ * supplying a fabricated guestId.
+ *
+ * The storefront calls this immediately after login succeeds (credentials:'include' carries the
+ * sov_guest cookie automatically). After the merge, subsequent requests use the customer's Bearer
+ * token and the guest history rows have been migrated to the customer's viewer key.
+ */
+async function mergeGuest(req: ModuleHttpRequest, deps: HandlerDeps): Promise<ModuleHttpResponse> {
+  // Must be a logged-in customer to merge.
+  const customerId = req.customer?.id;
+  if (typeof customerId !== 'string' || customerId.length === 0) {
+    return json(401, { error: 'login_required' });
+  }
+
+  // The guestId comes from the core-verified sov_guest cookie (NOT from the body).
+  const guestId = req.guestId?.id;
+  if (typeof guestId !== 'string' || guestId.length === 0) {
+    // No guest cookie present — nothing to merge. Return 200 (idempotent).
+    return json(200, { merged: 0 });
+  }
+
+  const merged = await deps.repo.mergeGuestToCustomer(guestId, customerId);
+  return json(200, { merged });
 }
 
 /**

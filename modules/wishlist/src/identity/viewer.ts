@@ -1,26 +1,26 @@
 /**
- * recently-viewed — resolving the VIEWER KEY (the per-viewer scoping identity).
+ * wishlist -- resolving the VIEWER KEY (the per-viewer scoping identity).
  *
  * Two identity paths, mutually exclusive:
  *
  *   1. ACCOUNT (primary): a logged-in shopper. The viewer key is the core-VERIFIED
- *      `req.customer.id` — never read from body/query/headers.
+ *      `req.customer.id` -- never read from body/query/headers.
  *
  *   2. GUEST (opt-in): an anonymous shopper. The viewer key is derived from `req.guestId.id`,
  *      the core-VERIFIED guest identity the guard set from a signed, tenant-scoped sov_guest
  *      httpOnly cookie that the API minted. It is NEVER read from client input.
  *
  * A verified customer ALWAYS wins over a supplied guestId. When neither yields a key, there
- * is NO viewer — the handler maps that to 401 on a write and an empty list on a read.
+ * is NO viewer -- the handler maps that to 401 on a write and an empty list on a read.
  *
  * KEY NAMESPACE SEPARATION: customer and guest keys are prefixed differently in the shared
  * `viewer_key` column so the two key spaces are disjoint by construction. A guest cannot
- * collide with a customer by having an id that matches a customer's UUID — the prefixes
+ * collide with a customer by having an id that matches a customer's UUID -- the prefixes
  * differ.
  */
 import type { ModuleHttpRequest } from '@sovecom/module-sdk';
 
-/** Namespace prefixes — customer and guest key spaces are disjoint by construction. */
+/** Namespace prefixes -- mirrors the recently-viewed pattern. */
 export const CUSTOMER_KEY_PREFIX = 'cust:';
 export const GUEST_KEY_PREFIX = 'guest:';
 
@@ -44,7 +44,7 @@ export function resolveViewer(req: ModuleHttpRequest): Viewer {
   if (typeof cid === 'string' && cid.length > 0) {
     return { kind: 'customer', key: CUSTOMER_KEY_PREFIX + cid };
   }
-  // 2. Core-derived guest identity (NEVER from client input — set by the guard from a
+  // 2. Core-derived guest identity (NEVER from client input -- set by the guard from a
   //    signed sov_guest cookie).
   const gid = req.guestId?.id;
   if (typeof gid === 'string' && gid.length > 0) {

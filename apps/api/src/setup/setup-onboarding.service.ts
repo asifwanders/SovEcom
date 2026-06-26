@@ -91,6 +91,11 @@ export interface TaxConfigureResult {
   defaultCurrency: string;
   /** Present only when a VAT number was VIES-checked; reflects the tri-state. */
   vatStatus?: ViesStatus;
+  /**
+   * Human-facing explanation of the VIES validation result.
+   * Present when vatStatus is set, to clarify what each status means for operations.
+   */
+  vatStatusMessage?: string;
 }
 
 /**
@@ -148,9 +153,19 @@ export class SetupOnboardingService {
 
     // 4. VIES-validate the VAT number (fail-open — a VIES outage never blocks setup).
     let vatStatus: ViesStatus | undefined;
+    let vatStatusMessage: string | undefined;
     if (taxMode === 'eu_vat' && dto.vatNumber) {
       const result = await this.vies.validateVatNumber(dto.vatNumber);
       vatStatus = result.status;
+      // Provide a human-facing message explaining the VIES result to the operator.
+      if (vatStatus === 'valid') {
+        vatStatusMessage = 'VAT number validated successfully. B2B reverse-charge will apply.';
+      } else if (vatStatus === 'invalid') {
+        vatStatusMessage = 'VAT number validation failed. VAT will be charged on all sales.';
+      } else if (vatStatus === 'unreachable') {
+        vatStatusMessage =
+          'VAT validation service (VIES) is currently unreachable. VAT will be charged on all sales as a precaution. The validation will be retried automatically later, and if the number is valid, reverse-charge can be applied retrospectively.';
+      }
     }
 
     // 5. Persist tax regime via the typed seam (read-merge-write, defaults respected).
@@ -167,7 +182,7 @@ export class SetupOnboardingService {
     // 6. Persist the onboarding profile (business country + default currency).
     await this.settings.updateOnboardingProfile(tenantId, { businessCountry, defaultCurrency });
 
-    return { taxMode, businessCountry, defaultCurrency, vatStatus };
+    return { taxMode, businessCountry, defaultCurrency, vatStatus, vatStatusMessage };
   }
 
   // ─── compliance/configure ──────────────────────────────────────────────────────
