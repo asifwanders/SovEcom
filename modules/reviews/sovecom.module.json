@@ -1,0 +1,10 @@
+{
+  "name": "reviews",
+  "displayName": "Product reviews",
+  "version": "0.1.0",
+  "compatibleCore": "^1.0.0",
+  "permissions": ["write:own_tables", "read:products", "read:orders"],
+  "slots": [{ "slot": "product-detail-reviews-section", "component": "review-list" }],
+  "settings": { "schema": "./settings.schema.json" },
+  "tables": ["mod_reviews_reviews"]
+}

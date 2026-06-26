@@ -1,0 +1,33 @@
+{
+  "name": "@sovecom/module-contract-tests",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "description": "Author-run contract validator for a SovEcom module directory.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "module-contract-tests": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@sovecom/module-sdk": "workspace:*",
+    "typescript": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "create-sovecom-module": "workspace:*",
+    "vitest": "^4.0.0"
+  }
+}

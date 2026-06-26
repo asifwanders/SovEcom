@@ -1,0 +1,10 @@
+{
+  "name": "recently-viewed",
+  "displayName": "Recently viewed",
+  "version": "0.1.0",
+  "compatibleCore": "^1.0.0",
+  "permissions": ["write:own_tables", "read:products"],
+  "slots": [{ "slot": "home-page-bottom", "component": "product-carousel" }],
+  "settings": { "schema": "./settings.schema.json" },
+  "tables": ["mod_recently-viewed_views"]
+}

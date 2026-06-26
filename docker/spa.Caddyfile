@@ -1,0 +1,8 @@
+# Static SPA server for the admin and setup single-page apps.
+# Serves the built assets from /srv on :80 with history-API fallback.
+:80 {
+	root * /srv
+	encode gzip
+	try_files {path} /index.html
+	file_server
+}

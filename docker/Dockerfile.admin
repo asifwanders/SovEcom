@@ -1,0 +1,22 @@
+# Build stage
+FROM node:24.14.1-alpine AS builder
+
+WORKDIR /app
+
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY tsconfig.base.json ./
+COPY packages/ ./packages/
+COPY apps/admin/ ./apps/admin/
+COPY brand/ ./brand/
+
+RUN npm install -g pnpm@11.4.0
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @sovecom/admin build
+
+# Production stage - static SPA served by Caddy on :80
+FROM caddy:2-alpine AS production
+
+COPY --from=builder /app/apps/admin/dist /srv
+COPY docker/spa.Caddyfile /etc/caddy/Caddyfile
+
+EXPOSE 80

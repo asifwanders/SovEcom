@@ -1,0 +1,235 @@
+---
+title: Architecture Overview
+description: High-level system design for developers building themes, modules, and integrations on SovEcom.
+---
+
+SovEcom is an EU-first, self-hosted headless commerce platform. This page maps the major pieces and how they connect. Next steps: [Theme Authoring](/guides/themes/), [Module Authoring](/guides/modules/), or the [JS Client Library](/guides/client-js/).
+
+---
+
+## Monorepo layout
+
+The repository is managed with pnpm workspaces and Turborepo.
+
+```
+sovecom/
+├── apps/
+│   ├── api/                 # NestJS backend (core)
+│   ├── admin/               # React 19 + Vite admin UI
+│   ├── setup/               # First-run setup wizard (served at /setup)
+│   └── storefront-next/     # Reference Next.js 15 storefront
+├── packages/
+│   ├── core/                # Shared types, constants, contracts
+│   ├── module-sdk/          # Public SDK for module authors
+│   ├── theme-sdk/           # Public SDK for theme authors
+│   ├── client-js/           # JS client library for storefronts
+│   ├── create-sovecom-module/   # Module scaffolding CLI
+│   ├── create-sovecom-theme/    # Theme scaffolding CLI
+│   ├── module-contract-tests/   # Contract test suite for module authors
+│   └── theme-contract-tests/    # Contract test suite for theme authors
+├── modules/                 # First-party reference modules
+│   ├── reviews/
+│   ├── wishlist/
+│   ├── recently-viewed/
+│   └── notify-back-in-stock/
+├── themes/                  # First-party reference themes
+├── docs/                    # This documentation site (Astro Starlight)
+├── docker/                  # Docker Compose files, Caddyfile templates
+└── scripts/                 # Dev scripts, seed data, migration helpers
+```
+
+---
+
+## Stack at a glance
+
+| Layer | Technology |
+|---|---|
+| Backend | TypeScript · Node.js LTS · NestJS v11 |
+| Database | PostgreSQL 17 · Drizzle ORM |
+| Cache, sessions, rate limits | Redis 7 (ioredis) |
+| Background jobs | `@nestjs/schedule` cron + Postgres transactional outbox |
+| Search | Meilisearch (adapter pattern; Typesense/Algolia are drop-ins) |
+| Admin UI | React 19 · Vite · shadcn/ui · Tailwind 3 |
+| Reference storefront | Next.js 15 App Router · Tailwind 3 |
+| Reverse proxy / SSL | Caddy 2 (automatic Let's Encrypt) |
+| Auth | JWT access + refresh · Argon2id · TOTP (otplib) |
+| File storage | Local filesystem by default; S3-compatible adapter for production |
+| Email | Nodemailer · Brevo SMTP (any SMTP works) |
+| Containerization | Docker + Docker Compose (Kubernetes optional) |
+
+All runtimes and frameworks follow the **latest-LTS rule**: current actively-supported release, exact versions pinned in `package.json` and the lockfile. Deliberate exceptions (e.g. Tailwind held at v3; Redis 8 deferred pending licence review) are documented in the release notes.
+
+---
+
+## API surfaces
+
+The backend exposes two versioned REST APIs. Both are consumed by the admin UI and by any external integrator — the admin UI uses only these public APIs and holds no back-channel.
+
+| Surface | Base path | Auth |
+|---|---|---|
+| Storefront API | `/store/v1/*` | Unauthenticated (public reads); customer session token for cart/account |
+| Admin API | `/admin/v1/*` | Admin JWT (access 15 min + refresh 7 day in httpOnly cookie) |
+
+**Response shape conventions**
+
+- Single resource: `{ "data": { … } }`
+- Collections: `{ "data": […], "meta": { "total": N, "page": N, "limit": N } }`
+- Errors: `{ "error": { "code": "machine_readable_code", "message": "…", "details": […] } }`
+- Money: integer minor units (cents) + separate currency code field. Never floats.
+- Timestamps: ISO 8601 UTC.
+
+Breaking changes only at major version bumps. Deprecated endpoints are supported for at least 12 months after notice. The full OpenAPI spec is auto-generated from the code and published as the [API Reference](/api-reference/).
+
+Modules can add endpoints under `/store/v1/modules/{module_name}/*` and `/admin/v1/modules/{module_name}/*` — they cannot replace or override core endpoints.
+
+---
+
+## Module system
+
+Modules extend SovEcom with new behaviour. Each module runs in its **own out-of-process worker** with no ambient database credentials. It communicates with core exclusively through the capability-gated `@sovecom/module-sdk` broker — the single chokepoint that enforces permissions, scopes by tenant, and refuses any direct write to core tables or the checkout/cart/payments/inventory path.
+
+### Manifest
+
+Every module ships a `sovecom.module.json` at its root:
+
+```json
+{
+  "name": "wishlist",
+  "displayName": "Wishlist",
+  "version": "1.0.0",
+  "compatibleCore": "^1.0.0",
+  "permissions": [
+    "read:products",
+    "write:own_tables"
+  ],
+  "slots": [
+    { "slot": "product-detail-sidebar", "component": "wishlist-button" }
+  ],
+  "settings": { "schema": "./settings.schema.json" },
+  "tables": ["mod_wishlist_items"]
+}
+```
+
+Permissions are declared up-front. The admin sees them before install and must explicitly approve. Anything not declared is denied by default.
+
+### What modules can and cannot do
+
+**Can do**
+- Add UI to declared slot positions in themes
+- Add settings pages to the admin sidebar
+- Subscribe to core events (`order.paid`, `product.updated`, etc.) through the in-process SDK event bus (`sdk.events.on`)
+- Read core data through the SDK (subject to declared permissions)
+- Write to their own namespaced tables (`mod_{module_name}_*`)
+- Add endpoints under the module-scoped API paths above
+
+**Cannot do**
+- Write to any core table directly
+- Bypass permission checks
+- Replace or intercept core endpoints
+- Inject into the checkout, cart, payments, or inventory path
+- Access another module's tables
+- Read the filesystem outside their own data directory
+- Make outbound network requests not declared in permissions
+
+### `@sovecom/module-sdk` exports
+
+The SDK (`packages/module-sdk/src/index.ts`) is the author-facing contract. Key exports:
+
+- **`defineModule`** / **`SovecomModule`** — define and type a module entry point
+- **`defineSlots`** — declare the UI slots a module renders into
+- **`createNamespacedTable`** — derive a `mod_{name}_*` namespaced table name; modules read/write their own tables with parameterized SQL via `sdk.tables` (no Drizzle or `pg` handle)
+- **`ModuleSdk`** — the capability bag passed into `activate()`: `StoreClient`, `AdminClient`, `CommerceClient`, `HttpClient`, `TablesClient`, `EventsClient`, `EmailClient`
+- **`ModuleManifest`** / **`moduleManifestSchema`** / **`parseAndVerifyManifest`** — manifest types and validators (single source of truth)
+- **`CORE_API_VERSION`** / **`assertCoreCompatible`** — gate against core semver at load time
+- **`RpcErrorCode`** — typed error codes for capability call error handling
+
+See [Module Authoring](/guides/modules/) and [Module Security](/guides/module-security/) for the full contract.
+
+---
+
+## Theme system
+
+A theme is a **declarative asset** — it has no runtime entrypoint, no worker, no capabilities, and no namespaced tables. It ships a manifest, static/template assets, and optional slot-widget descriptors.
+
+Themes declare the slot positions that modules can render into. When a slot conflict arises (two modules targeting the same slot), the admin chooses which renders — no silent overrides.
+
+### `@sovecom/theme-sdk` exports
+
+The SDK (`packages/theme-sdk/src/index.ts`) exports:
+
+- **`defineTheme`** / **`DefineThemeConfig`** — author entry point and config type
+- **`defineThemeSlots`** — declare named slot positions the theme exposes
+- **`defineThemeSettings`** / **`ThemeSettings`** — typed settings schema for admin-configurable values
+- **`ThemeManifest`** / **`themeManifestSchema`** / **`parseAndVerifyThemeManifest`** — manifest contract and validator
+- **`defineTemplate`** / **`defineSection`** / **`ThemeTemplate`** / **`TemplateSection`** — JSON-based page template and section composition
+- **`parseWidget`** / **`WidgetDescriptor`** / widget prop types — closed, core-owned vocabulary of widget types that modules return for storefront rendering; the storefront renders its own MIT components for them
+- **`ActiveTheme`** / **`SlotBinding`** / **`SlotMap`** — store-contract types consumed by the storefront
+
+See [Theme Authoring](/guides/themes/) and [Theme Contract](/guides/theme-contract/).
+
+---
+
+## Data layer
+
+**PostgreSQL** is the only supported relational database. Drizzle ORM is used throughout; raw SQL is available as an escape hatch.
+
+Conventions every table follows:
+- `id` — UUID v7 (sortable by creation time)
+- `created_at`, `updated_at` — always present
+- `tenant_id` — UUID, indexed, foreign key to `tenants`; scoped on every query
+- Soft deletes (`deleted_at`) only where explicitly required (orders, customers); hard delete everywhere else
+- JSONB columns only for genuinely schema-less metadata, never for queryable data
+- Money stored as integer cents + separate currency code column
+
+**Module tables** use the `mod_{module_name}_*` prefix and are migrated independently of core. Uninstalling a module offers to delete its data; disabling preserves it.
+
+**Multi-tenancy:** v1 ships single-tenant (`tenants` has one row) but `tenant_id` is threaded through every query, every cache key, and every search index to enable a future multi-tenant cloud without a full-codebase refactor.
+
+---
+
+## Infrastructure services
+
+| Service | Role |
+|---|---|
+| **Redis 7** | Cart state, session store, inventory reservations, BullMQ job queue |
+| **Meilisearch** | Full-text product and catalog search; index scoped by `tenant_id` |
+| **Caddy 2** | Reverse proxy, automatic TLS via Let's Encrypt |
+| **S3-compatible storage** | Media files in production (MinIO, Scaleway Object Storage, Hetzner) |
+| **Sharp** | Image resize + AVIF/WebP/JPEG variants processed on upload |
+
+---
+
+## Observability
+
+- **Structured logging** — JSON to stdout, captured by Docker logging driver
+- **Health check** — `GET /health` returns 200 with per-subsystem status
+- **Metrics** — `GET /metrics` exposes Prometheus-compatible metrics
+- **Traces** — OpenTelemetry exporter, configurable, disabled by default
+- **No telemetry sent to SovEcom** by default — opt-in only, anonymized, disclosed
+
+---
+
+## Deployment topologies
+
+In ascending operational complexity:
+
+1. **Single VPS, all-in-one** — `docker compose up` (the default and documented story)
+2. **VPS + managed Postgres** (Neon, Supabase, RDS)
+3. **VPS + managed Postgres + managed Redis + S3**
+4. **Multi-server self-managed** (separate app, DB, Redis hosts)
+5. **Kubernetes** — Helm chart provided, optional
+
+---
+
+## Where to go next
+
+| Goal | Starting point |
+|---|---|
+| Build a storefront or call the API from JavaScript | [JS Client Library](/guides/client-js/) |
+| Build or customize a theme | [Theme Authoring](/guides/themes/) |
+| Build a module (new features, integrations) | [Module Authoring](/guides/modules/) |
+| Understand module permission boundaries | [Module Security](/guides/module-security/) |
+| Receive events from core | [Webhooks](/guides/webhooks/) |
+| Add custom API endpoints from a module | [Custom Endpoints](/guides/custom-endpoints/) |
+
+Last updated: 2026-06-25

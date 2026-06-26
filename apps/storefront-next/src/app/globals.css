@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ubuntu is self-hosted via @fontsource, imported in the app entrypoint
+   (layout.tsx) so the bundler fingerprints and serves the font files from our
+   own origin — never the Google Fonts CDN (RGPD). */
+
+:root {
+  --background: #F4F2EF;
+  --foreground: #292524;
+  --card: #FCFBF9;
+  --card-foreground: #292524;
+  --popover: #FCFBF9;
+  --popover-foreground: #292524;
+  --muted: #EDEAE5;
+  --muted-foreground: #6B6660;
+  --border: #E2DED8;
+  --input: #D6D2CB;
+  --ring: #00766A;
+
+  /* Brand teal darkened to meet WCAG 2.1 AA contrast as text in light mode. The original
+     #00B9A0 failed AA as `text-primary` (2.22:1 vs --background, 2.07:1 vs --muted). #00766A
+     clears 4.5:1 against both light surfaces (4.95:1 / 4.61:1) while staying a recognizable
+     teal; the foreground flips to white so `bg-primary` buttons maintain ≥4.5:1 contrast (5.53:1).
+     The exact brand shade may be refined later as long as it remains AA-compliant. */
+  --primary: #00766A;
+  --primary-hover: #006257;
+  --primary-active: #004F46;
+  --primary-foreground: #FFFFFF;
+
+  --secondary: #EDEAE5;
+  --secondary-foreground: #292524;
+  --accent: #EDEAE5;
+  --accent-foreground: #292524;
+
+  --success: #15803D;
+  --success-foreground: #FBFBFA;
+  --warning: #B45309;
+  --warning-foreground: #FBFBFA;
+  /* Destructive red darkened (red-600 #DC2626 → red-700 #B91C1C) to meet WCAG 2.1 AA contrast as
+     text in light mode. #DC2626 as `text-destructive` failed SC 1.4.3 on --background (4.32:1).
+     #B91C1C clears 4.5:1 on every light surface (5.79:1 vs --background, 6.26:1 vs --card,
+     6.47:1 vs white) while staying recognizably red; the white --destructive-foreground keeps
+     FILLED `bg-destructive` buttons AA-compliant (6.25:1). Dark-mode --destructive is unaffected. */
+  --destructive: #B91C1C;
+  --destructive-foreground: #FBFBFA;
+  --info: #2563EB;
+  --info-foreground: #FBFBFA;
+
+  --radius: 0.5rem;
+
+  /* Typography tokens with system-stack font families — RGPD-clean by construction: no webfont
+     files, no Google Fonts / CDN. --font-sans mirrors the self-hosted body stack; --font-heading
+     defaults to the same stack so the default theme is visually unchanged. Themes can override
+     --font-heading to a serif stack or other font family via the `fontHeading` setting. */
+  --font-sans: 'Ubuntu', system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+}
+
+.dark {
+  --background: #1A1816;
+  --foreground: #E8E4DE;
+  --card: #232020;
+  --card-foreground: #E8E4DE;
+  --popover: #232020;
+  --popover-foreground: #E8E4DE;
+  --muted: #2A2624;
+  --muted-foreground: #A8A29E;
+  --border: #322E2B;
+  --input: #3D3936;
+  --ring: #2DD4BF;
+
+  --primary: #2DD4BF;
+  --primary-hover: #5EEAD4;
+  --primary-active: #99F6E4;
+  --primary-foreground: #04221D;
+
+  --secondary: #2A2624;
+  --secondary-foreground: #E8E4DE;
+  --accent: #2A2624;
+  --accent-foreground: #E8E4DE;
+
+  --success: #4ADE80;
+  --success-foreground: #141210;
+  --warning: #FBBF24;
+  --warning-foreground: #141210;
+  --destructive: #F87171;
+  --destructive-foreground: #141210;
+  --info: #60A5FA;
+  --info-foreground: #141210;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* Headings resolve to --font-heading, which defaults to --font-sans so the default theme is
+   visually unchanged. Themes can switch all headings to serif by overriding --font-heading
+   via the `fontHeading` setting. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+}
+
+/* Subtle (~150ms) color transition when toggling light/dark. Scoped to color
+   properties only (never layout) and disabled entirely under `prefers-reduced-motion` so the toggle
+   is instant for motion-sensitive visitors. */
+@media (prefers-reduced-motion: no-preference) {
+  body,
+  body * {
+    transition-property: background-color, border-color, color, fill, stroke;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+}

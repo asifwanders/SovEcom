@@ -1,0 +1,304 @@
+---
+title: JS Client Library
+description: Install and use @sovecom/client-js to call store and admin endpoints from a Node.js or TypeScript app.
+---
+
+`@sovecom/client-js` is a thin, zero-dependency `fetch` wrapper generated from the SovEcom OpenAPI spec. It gives you path-/query-/body-typed requests against every endpoint in the API, a built-in error class, and two convenience methods for checkout and guest order lookup.
+
+See the [architecture overview](/getting-started/architecture-overview/) for how the API is structured, and the [auto-generated API reference](/api-reference/) for the full endpoint list.
+
+## Installation
+
+```bash
+pnpm add @sovecom/client-js
+```
+
+:::note
+The `@sovecom/*` packages publish to npm with the SovEcom v1.0 release. Until then they ship only inside the monorepo — add `@sovecom/client-js` as a `workspace:*` dependency when building against a source checkout.
+:::
+
+## Constructing the client
+
+Import `createSovEcomClient` and pass a `SovEcomClientOptions` object:
+
+```ts
+import { createSovEcomClient } from '@sovecom/client-js';
+
+const client = createSovEcomClient({
+  baseUrl: 'https://api.example.com',
+});
+```
+
+### Options
+
+| Option | Type | Required | Description |
+|---|---|---|---|
+| `baseUrl` | `string` | yes | API origin, e.g. `https://api.example.com`. Trailing slash is stripped automatically. |
+| `getToken` | `() => string \| null \| undefined \| Promise<…>` | no | Returns the customer bearer JWT. Called before each request; the result is sent as `Authorization: Bearer <token>`. Per-request `Authorization` headers are never overwritten. |
+| `headers` | `Record<string, string>` | no | Default headers merged into every request (e.g. a cart session token). |
+| `fetch` | `typeof fetch` | no | Override the fetch implementation. Defaults to `globalThis.fetch`. Pass a custom implementation for Node 18 and earlier or for tests. |
+
+### Authenticated client (customer)
+
+Pass `getToken` to send a customer JWT on every request:
+
+```ts
+import { createSovEcomClient } from '@sovecom/client-js';
+
+const client = createSovEcomClient({
+  baseUrl: process.env.API_URL!,
+  getToken: () => sessionStorage.getItem('token') ?? undefined,
+});
+```
+
+### Admin client
+
+Admin endpoints live under `/admin/v1/`. Pass the admin bearer token the same way:
+
+```ts
+import { createSovEcomClient } from '@sovecom/client-js';
+
+const adminClient = createSovEcomClient({
+  baseUrl: process.env.API_URL!,
+  getToken: async () => {
+    // Return a cached admin JWT; refresh it here if needed.
+    return process.env.ADMIN_TOKEN;
+  },
+});
+```
+
+## Calling endpoints
+
+All endpoints go through `client.request()`:
+
+```ts
+request<P extends PathFor<M>, M extends HttpMethod, TResponse = unknown>(
+  method: M,
+  path: P,
+  options?: RequestOptions<P, M>,
+): Promise<TResponse>
+```
+
+`path` is constrained to paths defined in the OpenAPI spec for the given `method`, so invalid paths are a compile error. `TResponse` defaults to `unknown` — the spec does not carry response body schemas, so you supply the type you expect.
+
+### Store API — list published products
+
+```ts
+import { createSovEcomClient } from '@sovecom/client-js';
+import type { components } from '@sovecom/client-js';
+
+// Supply your own response shape; the spec does not carry response bodies.
+type ProductListResponse = {
+  data: components['schemas']['CreateProductDto'][];
+  nextCursor: string | null;
+};
+
+const client = createSovEcomClient({ baseUrl: 'https://api.example.com' });
+
+const result = await client.request<
+  '/store/v1/products',
+  'get',
+  ProductListResponse
+>('get', '/store/v1/products', {
+  query: { pageSize: 20 },
+});
+
+console.log(result.data);
+```
+
+### Store API — get a product by slug
+
+```ts
+const product = await client.request<
+  '/store/v1/products/{slug}',
+  'get',
+  { slug: string; title: string; status: 'draft' | 'published' | 'archived' }
+>('get', '/store/v1/products/{slug}', {
+  path: { slug: 'my-cool-product' },
+});
+```
+
+### Store API — search
+
+The `/store/v1/search` endpoint accepts query parameters typed directly from the spec:
+
+```ts
+const results = await client.request<'/store/v1/search', 'get'>('get', '/store/v1/search', {
+  query: {
+    q: 'running shoes',
+    sort: 'price_asc',
+    minPrice: 5000,   // integer cents
+    maxPrice: 20000,
+    currency: 'EUR',
+    pageSize: 10,
+  },
+});
+```
+
+`sort` is typed as `'relevance' | 'price_asc' | 'price_desc' | 'newest'` — the compiler rejects any other string.
+
+## Admin endpoints
+
+Admin calls are identical in shape. The client sends `Authorization: Bearer <token>` from `getToken` automatically.
+
+### Create a product
+
+```ts
+import type { components } from '@sovecom/client-js';
+
+type CreateProductDto = components['schemas']['CreateProductDto'];
+
+const newProduct = await adminClient.request<
+  '/admin/v1/products',
+  'post'
+>('post', '/admin/v1/products', {
+  body: {
+    title: 'Canvas Tote Bag',
+    slug: 'canvas-tote-bag',
+    status: 'draft',
+    isBundle: false,
+    variants: [
+      {
+        sku: 'CTB-NAT-OS',
+        priceAmount: 2999, // 29.99 EUR in integer cents
+        currency: 'EUR',
+        stockQuantity: 100,
+        allowBackorder: false,
+        options: { color: 'natural' },
+        position: 0,
+      },
+    ],
+  } satisfies CreateProductDto,
+});
+```
+
+Money values are always **integer cents + currency code** — never floats.
+
+### Admin login
+
+```ts
+import type { components } from '@sovecom/client-js';
+
+type LoginDto = components['schemas']['LoginDto'];
+
+const session = await adminClient.request<
+  '/admin/v1/auth/login',
+  'post'
+>('post', '/admin/v1/auth/login', {
+  body: {
+    email: 'admin@example.com',
+    password: 'hunter2',
+  } satisfies LoginDto,
+});
+```
+
+## Convenience methods
+
+Two high-level methods cover the most common storefront flows.
+
+### `checkout(cartId)`
+
+Creates an order from an existing cart. The cart cookie token must be supplied via `headers` or `getToken`:
+
+```ts
+const order = await client.checkout<{ orderNumber: string }>(cartId);
+```
+
+This calls `POST /store/v1/carts/{cartId}/checkout` with `cartId` URL-encoded in the path.
+
+### `getOrderByNumber(orderNumber, orderToken)`
+
+Guest order lookup. The `orderToken` is sent in the `X-Order-Token` header — it is never placed in the URL:
+
+```ts
+const order = await client.getOrderByNumber<{ status: string }>(
+  'ORD-2026-00042',
+  'tok_abc123',
+);
+```
+
+## Typed responses
+
+The generated `components` and `operations` types are exported directly from `@sovecom/client-js`:
+
+```ts
+import type { components, operations, paths } from '@sovecom/client-js';
+
+// DTO for a request body
+type CreateProductDto = components['schemas']['CreateProductDto'];
+
+// Query parameters for the search endpoint
+type SearchQuery = operations['SearchStoreController_search']['parameters']['query'];
+
+// All paths that support GET
+import type { PathFor } from '@sovecom/client-js';
+type GetPaths = PathFor<'get'>;
+```
+
+Response body types are **not** generated — the API spec does not carry response schemas. Define your own response interfaces and pass them as the `TResponse` type parameter. This keeps the types honest: if you supply a type, you own the claim that it matches what the server actually returns.
+
+## Error handling
+
+`request()` throws `SovEcomApiError` for any non-2xx response:
+
+```ts
+import { createSovEcomClient, SovEcomApiError } from '@sovecom/client-js';
+
+const client = createSovEcomClient({ baseUrl: 'https://api.example.com' });
+
+try {
+  const product = await client.request<'/store/v1/products/{slug}', 'get'>(
+    'get',
+    '/store/v1/products/{slug}',
+    { path: { slug: 'does-not-exist' } },
+  );
+} catch (err) {
+  if (err instanceof SovEcomApiError) {
+    console.error(err.status);     // e.g. 404
+    console.error(err.statusText); // e.g. "Not Found"
+    console.error(err.body);       // parsed JSON body, or raw text if not JSON
+  } else {
+    throw err; // network error, abort, etc.
+  }
+}
+```
+
+The error message is `SovEcom API <status> <statusText>` and `err.name` is `'SovEcomApiError'`.
+
+## Cancellation
+
+Pass an `AbortSignal` per request to support timeouts or user-initiated cancellation:
+
+```ts
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 5000);
+
+const result = await client.request<'/store/v1/products', 'get'>(
+  'get',
+  '/store/v1/products',
+  { signal: controller.signal },
+);
+```
+
+## Regenerating types after API changes
+
+The types in `src/generated/api.ts` are generated from the API's OpenAPI spec. After any API schema change:
+
+```bash
+# In apps/api — dump the updated spec
+pnpm openapi:dump
+
+# In packages/client-js — regenerate the TypeScript types
+pnpm generate
+```
+
+CI enforces a diff guard: if the spec and the generated types diverge, the build fails.
+
+---
+
+See also:
+- [Webhooks guide](/guides/webhooks/)
+- [API reference](/api-reference/)
+- [Architecture overview](/getting-started/architecture-overview/)
+
+Last updated: 2026-06-25

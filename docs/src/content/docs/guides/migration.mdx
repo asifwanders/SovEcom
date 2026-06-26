@@ -1,0 +1,266 @@
+---
+title: Migration Guide
+description: SovEcom's versioning and deprecation policy, a reusable upgrade checklist for operators and module/theme authors, and a template for future major-version migration guides.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+<Aside type="note">
+  SovEcom is currently at **v1.x**. There are no breaking-change migrations yet — the
+  upgrade path within v1 is additive and handled by the operator upgrade procedure at
+  [/operator-guides/upgrade/](/operator-guides/upgrade/). This page describes the
+  structure that **future** major-version migration guides will follow, and documents the
+  versioning and deprecation policy every operator and module/theme author should
+  understand before that day arrives.
+</Aside>
+
+## Versioning policy
+
+SovEcom follows [Semantic Versioning 2.0.0](https://semver.org/).
+
+| Increment | Meaning |
+|-----------|---------|
+| **MAJOR** (`x.0.0`) | Incompatible, breaking changes |
+| **MINOR** (`1.x.0`) | Additive, backward-compatible new functionality |
+| **PATCH** (`1.0.x`) | Backward-compatible bug fixes only |
+
+### What the semver contract covers
+
+The contract covers every interface a third party can build against:
+
+- Public Admin API — `POST /admin/v1/*`
+- Public Store API — `GET /store/v1/*`
+- Module SDK exports — `@sovecom/module-sdk`
+- Theme SDK exports — `@sovecom/theme-sdk`
+- Client library exports — `@sovecom/client-js`
+- CLI commands and their flags
+- Database schema changes exposed through the API
+- Configuration file format (`sovecom.config.ts`, `docker-compose.yml` env vars)
+- Webhook payload shapes
+
+The contract does **not** cover internal implementation details, private packages,
+Admin UI layout, or performance characteristics.
+
+### Release cadence
+
+| Type | Target cadence |
+|------|----------------|
+| Patch (`1.0.x`) | Weekly when fixes are available |
+| Security patch | Within 48 h (critical) / 7 days (high) |
+| Minor (`1.x.0`) | Monthly |
+| Major (`x.0.0`) | Annual at most |
+
+### Deprecation window
+
+When any public API, SDK function, or configuration key is deprecated:
+
+1. The deprecation is announced in a **minor release** with a `Deprecated` CHANGELOG entry, an `X-API-Deprecation` response header on affected endpoints, and a link to the migration guide.
+2. The deprecated feature **stays functional for at least 12 months**.
+3. It is **removed only in the next major version**, accompanied by a migration guide.
+
+### Major-version announcement timeline
+
+| When | What happens |
+|------|--------------|
+| T − 6 months | Intent published; migration-guide draft opened for feedback |
+| T − 3 months | API surface locked; beta released with breaking changes |
+| T − 1 month | Release candidate published |
+| Release day | Stable major released; automated migration tooling available |
+| T + 12 months | Previous major receives security patches until end of this window |
+
+Direct upgrades are supported from any version released within the last **24 months**. Beyond that window, step through intermediate major versions (e.g. 1.0 → 2.0 → 3.0).
+
+---
+
+## Upgrade checklist
+
+For minor/patch upgrades within the same major, follow [/operator-guides/upgrade/](/operator-guides/upgrade/). For major-version upgrades, work through the steps below.
+
+### Operators
+
+- [ ] Subscribe to release notifications (GitHub Releases, email newsletter, or Atom feed)
+      so you receive the 6-month advance notice for the next major.
+- [ ] Read the full release notes and migration guide for the target version before
+      touching the server.
+- [ ] Check module/theme compatibility (Admin → Settings → Updates shows warnings for
+      modules that have not declared compatibility with the new core version).
+- [ ] Take a full PostgreSQL dump **immediately before** the upgrade:
+      ```bash
+      docker compose exec postgres pg_dump -U sovecom sovecom > backup-pre-upgrade.sql
+      ```
+- [ ] Test the upgrade on a staging copy of the production database first.
+- [ ] Apply any required **manual code changes** documented in the migration guide
+      (renamed env vars, removed config keys, changed API contracts) before pulling new
+      images.
+- [ ] Pull new Docker images:
+      ```bash
+      docker compose pull
+      ```
+- [ ] Run forward database migrations:
+      ```bash
+      docker compose run --rm api pnpm db:migrate
+      ```
+- [ ] Restart services:
+      ```bash
+      docker compose up -d
+      ```
+- [ ] Verify the health endpoint:
+      ```bash
+      curl https://your-store.example.com/health
+      ```
+- [ ] Smoke-test checkout end-to-end on a test order before reopening to customers.
+- [ ] If anything breaks: restore from the pre-upgrade dump and report the issue on GitHub.
+
+### Module and theme authors
+
+- [ ] Review the breaking-changes section of the new major's migration guide.
+- [ ] Update your `compatibleCore` constraint in `sovecom.module.json`:
+      ```json
+      {
+        "version": "2.0.0",
+        "compatibleCore": "^2.0.0"
+      }
+      ```
+- [ ] Bump your module package version (at minimum a **major** bump if you are dropping
+      support for the previous core).
+- [ ] Update all `@sovecom/module-sdk` / `@sovecom/theme-sdk` imports to the new major
+      package version.
+- [ ] Remove any usage of APIs or SDK exports that were deprecated in the previous cycle
+      (they are now gone).
+- [ ] Run your module's own test suite against the new core.
+- [ ] Publish the updated module version and update your changelog.
+- [ ] If your module has its own database migrations, test them against a clean v2 schema.
+
+---
+
+## How modules declare core compatibility
+
+Every module declares the core version range it supports in `sovecom.module.json`.
+The runtime gate in `@sovecom/module-sdk` checks this against `CORE_API_VERSION`
+(currently `'1.0.0'`) and refuses to load any module whose `compatibleCore` range does
+not satisfy the running core version.
+
+`packages/module-sdk/src/core-version.ts` exports the single constant the runtime gate
+and any tooling share:
+
+```ts
+// packages/module-sdk/src/core-version.ts
+export const CORE_API_VERSION = '1.0.0';
+```
+
+When a new major ships, `CORE_API_VERSION` is bumped to `'2.0.0'`. Any module whose
+manifest still reads `"compatibleCore": "^1.0.0"` will fail the `assertCoreCompatible`
+check and be **disabled with an admin notification** until the module author publishes a
+v2-compatible release.
+
+A minimal module manifest targeting v2 looks like:
+
+```json
+{
+  "name": "my-reviews",
+  "displayName": "My Reviews",
+  "version": "2.0.0",
+  "compatibleCore": "^2.0.0",
+  "permissions": ["read:products"]
+}
+```
+
+See [/guides/modules/](/guides/modules/) for the full module authoring guide.
+
+---
+
+## Template: upgrading from vX to vY
+
+The section below is the **template** every future major migration guide will follow, filled with a placeholder (1.x → 2.0) to show the shape. The content is illustrative, not authoritative — the real 2.0 guide will replace it when 2.0 ships.
+
+---
+
+### Upgrading from 1.x to 2.0 (template)
+
+<Aside type="caution">
+  This is a **template placeholder**. SovEcom 2.0 does not exist yet. These sections
+  show the structure the real migration guide will follow.
+</Aside>
+
+#### Breaking changes
+
+List every interface that changed incompatibly, with before/after examples.
+
+```ts
+// Illustrative only — no such rename exists in 1.x. This shows the SHAPE a
+// real 2.0 breaking-change entry would take.
+
+// Before (1.x)
+import { oldHelper } from '@sovecom/module-sdk';
+
+// After (2.0)
+import { newHelper } from '@sovecom/module-sdk'; // renamed export
+```
+
+#### Deprecations removed
+
+List every symbol, endpoint, or config key that was deprecated in 1.x and is now gone.
+
+| Removed | Replacement |
+|---------|-------------|
+| `GET /admin/v1/widgets` (deprecated 1.3) | `GET /admin/v2/widgets` |
+| `oldHelper()` (deprecated 1.5) | `newHelper()` |
+
+#### Required code changes
+
+Step-by-step instructions for each breaking change.
+
+<Steps>
+1. Rename all `oldHelper` imports to `newHelper` in your module source.
+2. Update your `sovecom.module.json` `compatibleCore` to `"^2.0.0"`.
+3. Replace all calls to `GET /admin/v1/widgets` with `GET /admin/v2/widgets` — the
+   response shape is unchanged; only the path version segment changed.
+4. Remove any feature flags prefixed `ff_v1_*` from your `.env`; they are gone.
+</Steps>
+
+#### Data migrations
+
+Describe any operator-side data migration steps beyond `pnpm db:migrate`.
+
+```bash
+# Example: backfill a new required column added in 2.0
+docker compose run --rm api node scripts/migrate-2.0-backfill-currency.js
+```
+
+Run this script **after** `pnpm db:migrate` and **before** restarting the API container.
+
+#### Rollback procedure
+
+If the upgrade fails after migrations have run, restore from the pre-upgrade dump:
+
+```bash
+docker compose down
+# Restore images to the last 1.x tag in docker-compose.yml, then:
+docker compose exec -T postgres psql -U sovecom sovecom < backup-pre-upgrade.sql
+docker compose up -d
+```
+
+Data written between the backup and the failed upgrade is lost. Plan a maintenance
+window and communicate it to customers before starting.
+
+---
+
+## Compatibility matrix
+
+Updated with each release.
+
+| SovEcom Core | Module SDK | Theme SDK | Client JS | Node.js LTS | PostgreSQL |
+|---|---|---|---|---|---|
+| 1.0.x | 1.x | 1.x | 1.x | 20+ | 16+ |
+| 2.0.x (future) | 2.x | 2.x | 2.x | 22+ | 17+ |
+
+---
+
+## Related guides
+
+- [Operator upgrade guide](/operator-guides/upgrade/) — step-by-step procedure for
+  minor and patch upgrades on a self-hosted stack.
+- [Module authoring guide](/guides/modules/) — full reference for building, versioning,
+  and publishing modules, including the `compatibleCore` field.
+
+Last updated: 2026-06-25

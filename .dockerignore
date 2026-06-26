@@ -1,0 +1,11 @@
+node_modules
+.turbo
+.git
+dist
+.next
+.DS_Store
+*.log
+.env
+.env.local
+.vscode
+.idea

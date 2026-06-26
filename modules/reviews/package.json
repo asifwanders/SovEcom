@@ -1,0 +1,29 @@
+{
+  "name": "@sovecom/module-reviews",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reviews — a SovEcom reference module (purchase-gated, moderated, text-only product reviews).",
+  "license": "AGPL-3.0-only",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test --ext .ts,.tsx",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "contract": "module-contract-tests .",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@sovecom/module-sdk": "workspace:^"
+  },
+  "devDependencies": {
+    "@sovecom/module-contract-tests": "workspace:*",
+    "@sovecom/theme-sdk": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@types/react": "^18.3.0",
+    "react": "^18.3.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.0.0"
+  }
+}

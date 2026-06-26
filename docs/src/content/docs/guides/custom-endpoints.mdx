@@ -1,0 +1,353 @@
+---
+title: Custom API Endpoints
+description: How to expose HTTP endpoints from a SovEcom module using the SDK `serve()` capability, and how core mounts and gates them.
+---
+
+A module exposes HTTP routes by registering a single handler with `sdk.serve()` inside `activate`. Core mounts those routes under:
+
+```
+/store/v1/modules/<name>/*   — public (optional customer auth)
+/admin/v1/modules/<name>/*   — admin JWT + modules:use permission required
+```
+
+The module never binds a port. Core proxies every matching request to the module worker over an
+internal RPC, shapes the request before it arrives (stripping auth tokens and hop-by-hop headers),
+and bounds the response before forwarding it to the caller.
+
+Table isolation, migration, and event capabilities are covered in [/guides/modules/](/guides/modules/).
+
+---
+
+## The `serve()` signature
+
+Defined in `packages/module-sdk/src/capabilities.ts`:
+
+```ts
+/** Register the module's HTTP handler. At most one; the last call wins. */
+serve(handler: ModuleHttpHandler): void;
+```
+
+Where `ModuleHttpHandler` (from `packages/module-sdk/src/http.ts`) is:
+
+```ts
+export type ModuleHttpHandler = (
+  req: ModuleHttpRequest,
+) => ModuleHttpResponse | Promise<ModuleHttpResponse>;
+```
+
+Call `sdk.serve(handler)` once inside `activate`. Calling it a second time replaces the first
+handler; only the last registration is active.
+
+---
+
+## Request shape — `ModuleHttpRequest`
+
+```ts
+export interface ModuleHttpRequest {
+  /** Which mount the request arrived on: 'store' (public) or 'admin' (RBAC-gated). */
+  readonly surface: 'store' | 'admin';
+
+  /** The HTTP method in its original casing ('GET', 'POST', …). */
+  readonly method: string;
+
+  /**
+   * The path UNDER the module mount.
+   * e.g. for /store/v1/modules/reviews/reviews, path === '/reviews'
+   */
+  readonly path: string;
+
+  /** Parsed query-string. Repeated keys arrive as string[]. */
+  readonly query: Record<string, string | string[]>;
+
+  /**
+   * Already-sanitised request headers. Core strips:
+   *   authorization, cookie, host, connection, content-length,
+   *   transfer-encoding, x-setup-token, x-forwarded-for, x-forwarded-host
+   */
+  readonly headers: Record<string, string>;
+
+  /**
+   * The request body serialised to a UTF-8 string, or undefined when absent.
+   * Capped at 512 KiB; oversized bodies arrive as undefined.
+   */
+  readonly body?: string;
+
+  /** The tenant this request is scoped to. The module cannot widen it. */
+  readonly tenantId: string;
+
+  /**
+   * Core-verified customer principal, or undefined for an anonymous call.
+   *
+   * Set ONLY by the core proxy from a customer JWT it verified against the DB.
+   * It is NEVER sourced from the request body, headers, or query string —
+   * those inputs cannot influence it. Absent when no valid token was presented.
+   *
+   * A customer-scoped endpoint should return 401 when this is undefined.
+   */
+  readonly customer?: { readonly id: string };
+}
+```
+
+- `surface` indicates which mount received the request. The same handler sees both surfaces; admin-only paths should return `404` when `surface === 'store'` (see [the reviews example](#worked-example-reviews-module)).
+- `customer` is set exclusively by core from a verified JWT. A `customer` field in the request body or query cannot influence it. Personal-data routes should check `req.customer?.id` and return `401` when absent.
+- `tenantId` is injected by core (store mount → default tenant; admin mount → the JWT tenant). The module receives it for query scoping but cannot override it.
+
+---
+
+## Response shape — `ModuleHttpResponse`
+
+```ts
+export interface ModuleHttpResponse {
+  readonly status: number;
+  readonly headers?: Record<string, string>;
+  readonly body?: string;
+}
+```
+
+Core bounds every response before forwarding it to the caller:
+
+| Constraint | Value |
+|---|---|
+| Body cap | 512 KiB (oversized body is dropped; caller sees an empty body) |
+| Allowed response headers | `content-type`, `content-language`, `cache-control` |
+| Allowed media types | `application/json`, `text/plain`, `text/csv`, `application/octet-stream` |
+| Status code | Clamped to a valid HTTP status code; invalid values become `502` |
+
+Any header outside the allowlist (e.g. `set-cookie`, `authorization`, security headers) is
+silently stripped. Any media type not in the safe set is coerced to `application/octet-stream` —
+this prevents module bytes from rendering as HTML or JavaScript on the API origin.
+
+---
+
+## Mount paths and auth model
+
+The proxy controller (`apps/api/src/modules/modules-proxy.controller.ts`) registers two catch-all
+routes after the module management routes, so management endpoints always win:
+
+### Store surface — `GET|POST|… /store/v1/modules/:name/*`
+
+- **Decoration:** `@Public()` (opts out of the global admin JWT guard)
+- **Guard:** `StoreModuleCustomerAuthGuard` — optionally verifies a customer JWT if one is
+  presented. Valid JWT → `req.customer` is populated; no token → anonymous (still allowed);
+  invalid/expired token → `401`.
+- **Tenant:** resolved from the store's default tenant via `StoreTenantService`.
+- The module handler decides whether to require authentication by checking `req.customer`.
+
+### Admin surface — `GET|POST|… /admin/v1/modules/:name/*`
+
+- **Guard:** the global admin `JwtAuthGuard` (always active)
+- **Permission:** `modules:use` — an admin user must hold this permission in their tenant to
+  reach any module endpoint. This is distinct from `modules:write`, which covers install
+  management.
+- **Tenant:** taken from the admin JWT (`user.tenantId`).
+- The module handler receives `surface === 'admin'` and can gate admin-only paths on that field.
+
+A `404` is returned if the named module is not installed and enabled for the tenant.
+
+---
+
+## Worked example — the `reviews` module
+
+The `reviews` reference module (`modules/reviews/`) uses both surfaces. Its `activate` registers
+a single handler:
+
+```ts
+// modules/reviews/src/index.ts
+import { defineModule } from '@sovecom/module-sdk';
+import { MIGRATION_STATEMENTS } from './db/schema';
+import { ReviewsRepository } from './db/repository';
+import { resolveSettings } from './settings';
+import { handleRequest } from './api/handlers';
+
+export default defineModule({
+  async activate(sdk) {
+    const settings = resolveSettings(undefined);
+
+    for (const sql of MIGRATION_STATEMENTS) {
+      await sdk.tables.exec(sql);
+    }
+
+    const repo = new ReviewsRepository(sdk.tables);
+
+    // Mount the HTTP handler.
+    // Core proxies /store/v1/modules/reviews/* (public) and
+    // /admin/v1/modules/reviews/* (admin-gated) here.
+    // The handler branches on req.surface.
+    sdk.serve((req) =>
+      handleRequest(req, {
+        repo,
+        products: sdk.store.products,
+        commerce: sdk.commerce,
+        settings,
+      }),
+    );
+  },
+});
+```
+
+The module declares `"permissions": ["write:own_tables", "read:products", "read:orders"]` in
+`sovecom.module.json`. Only those three capabilities are available at runtime; any SDK call that
+requires an undeclared permission is refused by the broker with `FORBIDDEN`.
+
+### Route table
+
+| Surface | Method | Path under mount | Description |
+|---|---|---|---|
+| `store` | `POST` | `/reviews` | Submit a review (requires `customer`, purchase-gated) |
+| `store` | `GET` | `/reviews?productId=` | Public approved reviews + average |
+| `store` | `GET` | `/slot` | Slot data mount |
+| `admin` | `GET` | `/queue` | Pending moderation queue |
+| `admin` | `POST` | `/:id/approve` | Approve a review |
+| `admin` | `POST` | `/:id/reject` | Reject a review |
+
+### The handler (abridged)
+
+```ts
+// modules/reviews/src/api/handlers.ts (abridged)
+import type { ModuleHttpRequest, ModuleHttpResponse } from '@sovecom/module-sdk';
+
+function json(status: number, body: unknown): ModuleHttpResponse {
+  return {
+    status,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+}
+
+export async function handleRequest(
+  req: ModuleHttpRequest,
+  deps: HandlerDeps,
+): Promise<ModuleHttpResponse> {
+  if (!deps.settings.enabled) return json(404, { error: 'not_found' });
+
+  const method = req.method.toUpperCase();
+  const isAdmin = req.surface === 'admin';
+
+  // ── ADMIN surface ──
+  if (isAdmin) {
+    if (method === 'GET' && req.path === '/queue') return listQueue(req, deps);
+    if (method === 'POST') {
+      const mod = moderationFromPath(req.path);
+      if (mod) return moderate(deps, mod.id, mod.action);
+    }
+    return json(404, { error: 'not_found' }); // unknown admin paths → 404
+  }
+
+  // ── STORE surface ──
+  if (method === 'POST' && req.path === '/reviews') return submitReview(req, deps);
+  if (method === 'GET'  && req.path === '/reviews') return listPublic(req, deps);
+
+  return json(404, { error: 'not_found' });
+}
+
+async function submitReview(
+  req: ModuleHttpRequest,
+  deps: HandlerDeps,
+): Promise<ModuleHttpResponse> {
+  // Identity comes ONLY from the core-verified principal — never from the body.
+  const customerId = req.customer?.id;
+  if (!customerId) return json(401, { error: 'login_required' });
+
+  const body = JSON.parse(req.body ?? '{}') as Record<string, unknown>;
+  const productId = typeof body.productId === 'string' ? body.productId.trim() : undefined;
+  if (!productId) return json(400, { error: 'invalid_product_id' });
+
+  // Purchase gate via the gated read:orders commerce probe (returns a boolean, not order data).
+  const purchased = await deps.commerce.hasPurchased(customerId, productId);
+  if (!purchased) return json(403, { error: 'not_purchased' });
+
+  const row = await deps.repo.create(customerId, productId, body.rating, body.body, 'pending');
+  if (!row) return json(409, { error: 'already_reviewed' });
+
+  return json(201, { id: row.id, status: row.status });
+}
+```
+
+> The `submitReview` snippet above is an **abridged adaptation** for illustration. The real file
+> (`modules/reviews/src/api/handlers.ts`) includes `validateRating`, `validateBody`, and a product
+> existence check that are omitted here for brevity. Refer to that file for the full, tested
+> implementation.
+
+### Testing a handler in isolation
+
+Because `handleRequest` is pure over injected deps, unit tests mock the SDK surface:
+
+```ts
+import { handleRequest } from '../src/api/handlers';
+import type { ModuleHttpRequest } from '@sovecom/module-sdk';
+
+const baseReq = (overrides: Partial<ModuleHttpRequest>): ModuleHttpRequest => ({
+  surface: 'store',
+  method: 'GET',
+  path: '/reviews',
+  query: { productId: 'prod-1' },
+  headers: {},
+  tenantId: 'tenant-1',
+  ...overrides,
+});
+
+it('returns 401 when customer is absent on POST /reviews', async () => {
+  const req = baseReq({ method: 'POST', path: '/reviews', body: JSON.stringify({ productId: 'p1' }) });
+  const res = await handleRequest(req, mockDeps);
+  expect(res.status).toBe(401);
+});
+```
+
+No network, no database, no running server required.
+
+---
+
+## Security checklist
+
+Before shipping a module with endpoints, verify:
+
+- **Never trust `req.body` for identity.** Always use `req.customer?.id`; it is the only
+  core-verified principal the store surface provides.
+- **Branch on `req.surface`, not path, for admin gating.** Core enforces the admin JWT and
+  `modules:use` permission at the mount level, but the module must still refuse admin paths when
+  `surface === 'store'` — otherwise the same logic is reachable anonymously on the store surface.
+- **Validate and bound all input.** Treat `req.body`, `req.path`, `req.query`, and `req.headers`
+  as untrusted client input. Parse JSON with a try/catch. Length-check strings.
+- **Use parameterized queries.** `sdk.tables.query(sql, params)` and `sdk.tables.exec(sql, params)`
+  accept a params array; never concatenate user input into the SQL string.
+- **Scope every query to the caller.** For personal-data routes, always bind `customer_id`
+  (from `req.customer.id`) in every query — never expose another customer's rows.
+- **Declare only the permissions you need.** The broker enforces default-deny; undeclared
+  capabilities are refused regardless of which SDK methods the module calls.
+
+See [/guides/module-security/](/guides/module-security/) for the full endpoint-auth and permission
+reference.
+
+---
+
+## Module manifest (`sovecom.module.json`)
+
+A module that exposes endpoints requiring commerce or catalog data must declare the relevant
+permissions. For the `reviews` example:
+
+```json
+{
+  "name": "reviews",
+  "displayName": "Product reviews",
+  "version": "0.1.0",
+  "compatibleCore": "^1.0.0",
+  "permissions": ["write:own_tables", "read:products", "read:orders"],
+  "slots": [{ "slot": "product-detail-reviews-section", "component": "review-list" }],
+  "settings": { "schema": "./settings.schema.json" },
+  "tables": ["mod_reviews_reviews"]
+}
+```
+
+`read:orders` is required for `sdk.commerce.hasPurchased` (the purchase gate). Without it the
+broker returns `FORBIDDEN` regardless of what the module code does.
+
+---
+
+## Related guides
+
+- [/guides/modules/](/guides/modules/) — module authoring, manifest, table migrations, events
+- [/guides/module-security/](/guides/module-security/) — endpoint auth, permissions, threat model
+- [/guides/webhooks/](/guides/webhooks/) — emitting `mod.<name>.*` events to outbound webhooks
+- [/guides/client-js/](/guides/client-js/) — calling module store endpoints from the storefront JS client
+
+Last updated: 2026-06-25

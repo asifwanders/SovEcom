@@ -1,0 +1,14 @@
+node_modules
+dist
+.next
+.turbo
+.astro
+pnpm-lock.yaml
+LICENSE
+CHANGELOG.md
+docs
+
+# Generated artifacts — must stay byte-identical to their generators
+# (`openapi:dump` / `openapi-typescript`) so the CI `openapi-drift` git-diff guard passes.
+apps/api/openapi.json
+packages/client-js/src/generated/

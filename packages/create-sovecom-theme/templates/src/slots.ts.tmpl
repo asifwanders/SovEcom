@@ -1,0 +1,11 @@
+/**
+ * __THEME_NAME__ — the declarative slot slugs this theme exposes/renders.
+ *
+ * Slots are DECLARATIVE manifest metadata; the slot registry is DERIVED at runtime from enabled
+ * MODULES' manifests. `defineThemeSlots` is NOT an RPC and there is NO runtime `registerSlot()` —
+ * it just validates the slug shape (`^[a-z][a-z0-9-]*$`, no duplicates) and
+ * returns a frozen array dropped verbatim into the manifest's `slots`.
+ */
+import { defineThemeSlots } from '@sovecom/theme-sdk';
+
+export const slots = defineThemeSlots(['product-page']);

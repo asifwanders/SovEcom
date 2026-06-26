@@ -1,0 +1,22 @@
+---
+title: Security
+description: Security best practices for SovEcom.
+---
+
+# Security
+
+## Authentication
+
+- Passwords: Argon2id with ~200ms hash time
+- Admin: JWT access (15min) + refresh token (7 days)
+- Customer: JWT (30 days)
+- Rate limiting: 5 failed attempts → 15min lockout
+
+## Data Protection
+
+- Secrets encrypted at rest
+- HTTPS enforced in production
+- Audit logs for all admin actions
+- RGPD data export and erasure
+
+Last updated: 2026-06-09

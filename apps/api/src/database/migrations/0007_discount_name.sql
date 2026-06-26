@@ -1,0 +1,1 @@
+ALTER TABLE "discounts" ADD COLUMN "name" text DEFAULT '' NOT NULL;

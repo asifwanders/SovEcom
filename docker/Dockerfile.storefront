@@ -1,0 +1,34 @@
+# Build stage
+FROM node:24.14.1-alpine AS builder
+
+WORKDIR /app
+
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY tsconfig.base.json ./
+COPY packages/ ./packages/
+COPY apps/storefront-next/ ./apps/storefront-next/
+COPY brand/ ./brand/
+
+RUN npm install -g pnpm@11.4.0
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @sovecom/storefront-next build
+
+# Production stage - Next.js standalone output
+FROM node:24.14.1-alpine AS production
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3001
+
+# Copy standalone output
+COPY --from=builder /app/apps/storefront-next/.next/standalone/ ./
+COPY --from=builder /app/apps/storefront-next/.next/static/ ./apps/storefront-next/.next/static/
+COPY --from=builder /app/apps/storefront-next/public/ ./apps/storefront-next/public/
+
+RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+USER nodejs
+
+EXPOSE 3001
+
+CMD ["node", "apps/storefront-next/server.js"]

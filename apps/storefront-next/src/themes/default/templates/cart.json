@@ -1,0 +1,21 @@
+{
+  "page": "cart",
+  "sections": [
+    {
+      "type": "columns",
+      "settings": {
+        "containerClass": "grid gap-8 lg:grid-cols-[1fr_20rem]",
+        "leftClass": "flex flex-col gap-6",
+        "rightClass": ""
+      },
+      "regions": {
+        "left": [
+          { "type": "cart-line-items" },
+          { "type": "cart-discount" },
+          { "type": "cart-shipping" }
+        ],
+        "right": [{ "type": "cart-summary" }]
+      }
+    }
+  ]
+}

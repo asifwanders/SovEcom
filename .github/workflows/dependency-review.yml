@@ -1,0 +1,22 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    # dependency-review-action needs the GitHub dependency graph, which on a private repo
+    # requires GitHub Advanced Security. This job is gated to public visibility and
+    # auto-activates when the repo goes public. The active CVE gate while private is the
+    # blocking `audit` (pnpm audit) job in ci.yml.
+    if: github.event.repository.visibility == 'public'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high

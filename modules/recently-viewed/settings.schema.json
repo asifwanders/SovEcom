@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Recently viewed module settings",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Master on/off. When false the module's endpoints return 404."
+    },
+    "maxItems": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 8,
+      "description": "How many recently-viewed products the GET surface returns (newest first). Clamped to [1, 50]."
+    },
+    "excludeCategories": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "default": [],
+      "maxItems": 100,
+      "description": "Category ids whose products are never surfaced in the recently-viewed list. A view whose product belongs to one of these categories is filtered out of the GET result. See README 'Category exclusion (runtime gap)'."
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "page": "product",
+  "sections": [
+    { "type": "breadcrumbs" },
+    {
+      "type": "columns",
+      "settings": {
+        "containerClass": "grid grid-cols-1 gap-10",
+        "leftClass": "",
+        "rightClass": "mx-auto max-w-2xl space-y-6"
+      },
+      "regions": {
+        "left": [{ "type": "product-gallery", "settings": { "layout": "grid" } }],
+        "right": [{ "type": "product-info" }, { "type": "variant-selector" }]
+      }
+    }
+  ]
+}

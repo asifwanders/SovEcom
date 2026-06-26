@@ -1,0 +1,37 @@
+# Normalize line endings: enforce LF in the repo for all text files.
+* text=auto eol=lf
+
+# Explicitly LF for source and config (defensive against editor settings)
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.sh    text eol=lf
+
+# Windows-specific scripts keep CRLF
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Treat these as binary (no diff, no EOL conversion)
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.avif  binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary

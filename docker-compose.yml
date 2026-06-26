@@ -1,0 +1,115 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17 # postgres 17 + pgvector (embedding columns need the `vector` extension)
+    environment:
+      POSTGRES_DB: sovecom
+      POSTGRES_USER: sovecom
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'sovecom']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sovecom
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sovecom
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.8
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?MEILI_MASTER_KEY must be set}
+    # No healthcheck: the Meilisearch image ships neither curl nor wget, so a
+    # CMD healthcheck can't reliably probe /health. Dependents use
+    # service_started until 0.5 wires a real client-side readiness check.
+    networks:
+      - sovecom
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    environment:
+      NODE_ENV: production
+      API_PORT: 3000
+      DATABASE_URL: postgres://sovecom:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/sovecom
+      REDIS_URL: redis://redis:6379
+      MEILISEARCH_URL: http://meilisearch:7700
+      # The API reads MEILI_MASTER_KEY (search.service.ts) — keep the var name aligned so the
+      # configured key actually reaches it. Required-var syntax fails `compose up` fast when unset.
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?MEILI_MASTER_KEY must be set}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      meilisearch:
+        condition: service_started
+    networks:
+      - sovecom
+
+  admin:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.admin
+    depends_on:
+      - api
+    networks:
+      - sovecom
+
+  setup:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.setup
+    depends_on:
+      - api
+    networks:
+      - sovecom
+
+  storefront:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.storefront
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: http://api:3000
+    depends_on:
+      - api
+    networks:
+      - sovecom
+
+  caddy:
+    image: caddy:2
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - admin
+      - setup
+      - storefront
+    networks:
+      - sovecom
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  sovecom:
+    driver: bridge

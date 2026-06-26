@@ -1,0 +1,36 @@
+version: 2
+
+updates:
+  # npm (pnpm) workspace — covers root + all apps/* and packages/*
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '05:00'
+      timezone: Europe/Paris
+    open-pull-requests-limit: 10
+    groups:
+      # Batch all non-major npm updates into a single weekly PR to cut review noise;
+      # major bumps still open as individual PRs so they get scrutiny.
+      npm-minor-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions versions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '05:00'
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    groups:
+      # Batch all GitHub Actions updates into one PR.
+      github-actions:
+        patterns:
+          - '*'

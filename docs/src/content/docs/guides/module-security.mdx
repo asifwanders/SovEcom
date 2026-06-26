@@ -1,0 +1,402 @@
+---
+title: Module Security Best Practices
+description: What modules can and cannot do, the permission model, the sandbox boundaries, and common mistakes — with the correct pattern shown for each.
+---
+
+For module authors. Read alongside [Module Authoring](/guides/modules/) and [Custom Endpoints](/guides/custom-endpoints/).
+
+---
+
+## The sandbox model
+
+Every module runs in its own **out-of-process worker**. The worker has no database credentials, no access to `/data/master.key`, no access to other modules' processes or tables, and no unrestricted network. The only channel between a module and core is a **capability-gated SDK broker** exposed through `sdk` inside `activate`.
+
+This means:
+- Core enforces every permission boundary, every tenant scope, and every rate limit **on its own side of the broker**. A module cannot widen or bypass these controls by what it passes in.
+- If a call is refused, the broker rejects it with an `RpcErrorCode` — the worker does not crash, but the call fails cleanly.
+- A compromise of a module cannot compromise core, other modules, or the payment/checkout path.
+
+---
+
+## Can / Cannot
+
+| Can | Cannot |
+|-----|--------|
+| Read products and categories via `sdk.store` (with `read:products` / `read:categories`) | Read, write, or query any core table directly |
+| Read order and customer summaries via `sdk.admin` (with `read:orders` / `read:customers`) | Touch the checkout, cart, payments, or inventory path — the broker refuses these categorically, not by permission |
+| Write to own namespaced tables via `sdk.tables` (with `write:own_tables`) | Declare a table that is not prefixed `mod_<name>_` — the manifest verifier rejects it |
+| Make outbound HTTP requests via `sdk.http` (with `http:outbound`, broker-mediated and SSRF-guarded) | Open arbitrary network sockets; egress is denied at the OS/container boundary unless it goes through the broker |
+| Send email via `sdk.email` (with `email:send`) | Access SMTP credentials, core transactional templates, or `from`/`cc`/`bcc` fields |
+| Emit and subscribe to events via `sdk.events` (with `emit:events` / `subscribe:events`) | Emit events on behalf of core or another module, or subscribe without the permission |
+| Serve HTTP endpoints via `sdk.serve` under the module's mount | Register routes on the core or admin surface outside its own mount |
+| Supply a **data descriptor** `{ type, props }` for a storefront slot | Supply HTML, JS, or React components that run inside core, the admin, or the storefront bundle |
+| Implement a gateway-adjacent feature as a module | Implement a payment gateway as a module — payment providers are trusted core integrations only |
+
+:::danger[Payment path is permanently closed]
+A module **can never enter the checkout, cart, payments, or inventory path**. This is not a permission that can be granted — the broker refuses these mutations categorically. Payment gateways must be reviewed as trusted core `PaymentProvider` integrations, not module installs.
+:::
+
+---
+
+## Permissions
+
+Declare only the permissions you actually use. The manifest verifier rejects anything outside the allowlist, and the broker refuses calls for undeclared permissions at runtime with `RpcErrorCode.FORBIDDEN`.
+
+| Permission | What it grants | Risk if misused |
+|---|---|---|
+| `read:products` | `sdk.store.products.list` and `.get` — field-limited product DTO | Low — public catalog data |
+| `read:categories` | `sdk.store.categories.list` and `.get` — field-limited category DTO | Low — public catalog data |
+| `read:orders` | `sdk.admin.orders.list` and `.get` — order DTO; also unlocks `sdk.commerce.hasPurchased` (boolean only) | Medium — order data is sensitive; declare only if needed |
+| `read:customers` | `sdk.admin.customers.list` and `.get` — **field-limited** DTO (no raw email in v1) | Medium — PII-adjacent; declare only if needed |
+| `write:own_tables` | `sdk.tables.query` and `.exec` — parameterized SQL against `mod_<name>_*` tables under the module's low-privilege DB role only | Medium — any schema change applies to your own tables only; core tables are unreachable |
+| `emit:events` | `sdk.events.emit` — publishes as `mod.<name>.<event>` | Low to medium — only other modules that subscribed receive it |
+| `subscribe:events` | `sdk.events.on` — subscribe to curated core events (`order.paid`, `product.price_changed`, `product.stock_changed`, `product.updated`, …) and other modules' `mod.<name>.*` | Low |
+| `http:outbound` | `sdk.http.fetch` — broker-mediated outbound HTTP (SSRF-guarded in core; allowlist is an operator-configured concern) | High — data exfiltration risk; declare only if your feature genuinely needs external calls |
+| `email:send` | `sdk.email.send` (supply the `to` address directly) and `sdk.email.sendToCustomer` (supply only `customerId`; core resolves the recipient) | Medium-high — rate-limited per module; subject to header-injection validation in core |
+
+### Minimum-permission principle
+
+The `wishlist` reference module uses four permissions and omits three it doesn't need:
+
+```json title="modules/wishlist/sovecom.module.json"
+{
+  "name": "wishlist",
+  "displayName": "Wishlist",
+  "version": "0.1.0",
+  "compatibleCore": "^1.0.0",
+  "permissions": ["read:products", "write:own_tables", "subscribe:events", "email:send"],
+  "slots": [{ "slot": "product-card-actions", "component": "toggle-button" }],
+  "settings": { "schema": "./settings.schema.json" },
+  "tables": ["mod_wishlist_items", "mod_wishlist_digest_log"]
+}
+```
+
+`read:customers`, `emit:events`, and `http:outbound` are not declared because the module does not use them. An operator installing a module sees the permission list before granting; superfluous permissions reduce trust.
+
+---
+
+## Table namespacing
+
+Every table a module creates must be named `mod_<name>_<suffix>`:
+
+- `<name>` is the module's `name` from the manifest (a lowercase slug).
+- `<suffix>` is lowercase `[a-z0-9_]+`.
+- The full name must be declared in the manifest's `tables` array.
+
+The manifest verifier (`parseAndVerifyManifest`) enforces this with a Zod `superRefine` — a table that does not start with `mod_wishlist_` in a manifest with `"name": "wishlist"` is rejected at install time, before any code runs.
+
+Use `createNamespacedTable` from the SDK to build the name at authoring time; it throws a clear error if either argument is invalid, so you catch mistakes at build time rather than install time:
+
+```ts
+import { createNamespacedTable } from '@sovecom/module-sdk';
+
+// "mod_wishlist_items"
+export const ITEMS_TABLE = createNamespacedTable('wishlist', 'items');
+
+// "mod_wishlist_digest_log"
+export const DIGEST_LOG_TABLE = createNamespacedTable('wishlist', 'digest_log');
+```
+
+The resulting names are what you pass to `sdk.tables.exec` in your migration DDL and to `sdk.tables.query` in your repository. They must match the `tables` array in your manifest exactly.
+
+:::caution[No raw SQL against core tables]
+`sdk.tables` runs your SQL under a low-privilege DB role that only has access to your module's own schema. You cannot reference `orders`, `products`, `customers`, or any other core table in your SQL — the query will fail at the database level, not just the broker level. Do not attempt it.
+:::
+
+---
+
+## Core-version compatibility
+
+Your manifest must declare a `compatibleCore` semver range that:
+
+1. Satisfies the running `CORE_API_VERSION` (currently `1.0.0`).
+2. Has its **lower-bound major** equal to the core major.
+
+```json
+"compatibleCore": "^1.0.0"
+```
+
+A module that declares `"^0.x"` or `">=2.0.0"` will be refused at install with a clear error. A major bump in core means all modules pinned to the old major refuse to load — this is the intended compatibility gate.
+
+---
+
+## Error codes
+
+When the broker refuses or fails a call it rejects with one of these codes (exported as `RpcErrorCode` from `@sovecom/module-sdk`):
+
+| Code | Meaning |
+|---|---|
+| `forbidden` | The call was refused — undeclared permission, cross-tenant attempt, or a categorically-blocked path (e.g. a payment mutation) |
+| `rate_limited` | A per-module capability cap was exceeded (e.g. `email:send` volume). Back off until the window rolls over |
+| `busy` | The worker's inbound concurrency cap was exceeded. Back off and retry |
+| `timeout` | The broker did not receive a response in time |
+| `handler_error` | The handler on the other side threw |
+| `channel_closed` | The IPC channel closed before a response arrived |
+| `protocol` | A frame was malformed or a param failed validation |
+| `unknown_method` | No handler is registered for the requested method |
+| `not_available` | The capability is in the vocabulary but not yet implemented |
+
+Branch on `RpcErrorCode` values rather than string-matching error messages, which are not part of the stable contract:
+
+```ts
+import { RpcErrorCode } from '@sovecom/module-sdk';
+
+try {
+  await sdk.email.send({ to, subject, text });
+} catch (err: unknown) {
+  if (err && typeof err === 'object' && 'code' in err) {
+    if ((err as { code: string }).code === RpcErrorCode.RATE_LIMITED) {
+      // back off — do not retry immediately
+      return;
+    }
+    if ((err as { code: string }).code === RpcErrorCode.FORBIDDEN) {
+      // declared permission missing from manifest
+      return;
+    }
+  }
+  throw err;
+}
+```
+
+---
+
+## Common mistakes
+
+### Trusting client-supplied identity
+
+❌ **Wrong** — reading the customer id from the request body or query string:
+
+```ts
+// NEVER do this — a caller controls the body
+async function addItem(req: ModuleHttpRequest) {
+  const body = JSON.parse(req.body ?? '{}');
+  const customerId = body.customerId; // ← attacker-controlled
+  await repo.add(customerId, body.variantId);
+}
+```
+
+✅ **Right** — reading only from `req.customer.id`, set by core from a verified JWT before the request reaches your handler (the raw token is stripped):
+
+```ts
+// From modules/wishlist/src/api/handlers.ts
+function requireCustomerId(req: ModuleHttpRequest): string | null {
+  const id = req.customer?.id;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+async function addItem(req: ModuleHttpRequest, deps: HandlerDeps) {
+  const customerId = requireCustomerId(req);
+  if (!customerId) return json(401, { error: 'login_required' });
+  // customerId is now core-verified; bind it as a SQL param
+  await deps.repo.add(customerId, variantId);
+}
+```
+
+`req.customer` is set **only** by the core proxy from a customer JWT it verified itself. A `customer` field in the request body, headers, or query cannot influence it.
+
+---
+
+### Trusting event payloads by shape
+
+❌ **Wrong** — treating an event payload as a typed object without validation:
+
+```ts
+await sdk.events.on('product.price_changed', async (payload) => {
+  // payload is `unknown` — casting it directly is unsafe
+  const { variantId, newPriceMinor } = payload as any;
+  await runDigest(variantId, newPriceMinor);
+});
+```
+
+✅ **Right** — validate every field of the incoming `unknown` payload before acting on it:
+
+```ts
+// Adapted from modules/wishlist/src/events/subscriptions.ts
+function readPriceDrop(payload: unknown): ProductPriceChangedPayload | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const p = payload as Record<string, unknown>;
+  if (typeof p.eventId !== 'string' || p.eventId.length === 0) return null;
+  if (typeof p.variantId !== 'string' || p.variantId.length === 0) return null;
+  if (typeof p.newPriceMinor !== 'number' || !Number.isInteger(p.newPriceMinor)) return null;
+  // … validate remaining fields …
+  return p as unknown as ProductPriceChangedPayload;
+}
+
+await sdk.events.on('product.price_changed', async (payload) => {
+  const drop = readPriceDrop(payload);
+  if (!drop) return; // malformed → silent no-op
+  await runDigest(drop);
+});
+```
+
+Event payload types (`ProductPriceChangedPayload`, `ProductStockChangedPayload`) are exported from `@sovecom/module-sdk` as the expected shapes — use them as the target of your validation, not as a cast.
+
+---
+
+### Using a non-namespaced table name
+
+❌ **Wrong** — writing a literal core table name in your SQL:
+
+```ts
+// This will fail at the DB level — the module's DB role has no access to `products`
+const result = await sdk.tables.query('SELECT * FROM products WHERE id = $1', [id]);
+```
+
+✅ **Right** — use only your declared namespaced tables, built with `createNamespacedTable`:
+
+```ts
+import { createNamespacedTable } from '@sovecom/module-sdk';
+
+const ITEMS_TABLE = createNamespacedTable('wishlist', 'items'); // → 'mod_wishlist_items'
+
+const result = await sdk.tables.query(
+  `SELECT * FROM ${ITEMS_TABLE} WHERE customer_id = $1`,
+  [customerId],
+);
+```
+
+---
+
+### Building SQL from user input
+
+❌ **Wrong** — interpolating user-controlled data into a SQL string:
+
+```ts
+// SQL injection — `sortField` is attacker-controlled
+const rows = await sdk.tables.query(
+  `SELECT * FROM ${ITEMS_TABLE} ORDER BY ${req.query.sort}`,
+);
+```
+
+✅ **Right** — always use the `params` array for values; allowlist any structural input (column names, sort direction) before interpolating:
+
+```ts
+const ALLOWED_SORT = new Set(['created_at', 'product_variant_id']);
+const sort = ALLOWED_SORT.has(req.query.sort as string) ? req.query.sort : 'created_at';
+
+const rows = await sdk.tables.query(
+  `SELECT * FROM ${ITEMS_TABLE} WHERE customer_id = $1 ORDER BY ${sort} DESC`,
+  [customerId], // ← value as param; column name allowlisted above
+);
+```
+
+---
+
+### Sending email with the recipient from module state
+
+❌ **Wrong** — resolving a customer email address yourself and passing it directly:
+
+```ts
+// Bad: the module now holds a PII email address
+const customer = await sdk.admin.customers.get(customerId);
+const email = (customer as any).email; // field-limited DTO has no email in v1
+await sdk.email.send({ to: email, subject, text });
+```
+
+✅ **Right** — use `sdk.email.sendToCustomer` and supply only the opaque `customerId`. Core resolves the recipient, honours RGPD erasure and marketing consent, and the module never sees the address:
+
+```ts
+const result = await sdk.email.sendToCustomer({
+  customerId,        // opaque id — core resolves the recipient
+  subject: 'Price drop on your wishlist',
+  text: '…',
+});
+// result.queued is true (sent) or false (suppressed by consent/erasure) — never an error for suppressed
+```
+
+A `{ queued: false }` result is deliberately opaque: the module cannot learn **why** the send was suppressed, so it gains no consent or existence oracle over the customer base.
+
+---
+
+### Supplying markup for slots
+
+❌ **Wrong** — returning HTML or a React component from a slot handler:
+
+```ts
+// A module must never inject HTML into the storefront or admin
+sdk.serve((req) => {
+  if (req.path === '/slot') {
+    return {
+      status: 200,
+      body: '<button onclick="...">Add to wishlist</button>', // ← stored XSS vector
+    };
+  }
+});
+```
+
+✅ **Right** — return a typed data descriptor `{ type, props }`. The storefront maps it to a curated MIT widget from the theme; no module code enters the storefront bundle:
+
+```ts
+// Adapted from modules/wishlist/src/slot/wishlist-slot.ts
+return {
+  status: 200,
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({
+    type: 'toggle-button',
+    props: {
+      initialOn: alreadyWishlisted,
+      onAction:  { path: `/store/v1/modules/wishlist/items/${encodeURIComponent(productId)}/add` },
+      offAction: { path: `/store/v1/modules/wishlist/items/${encodeURIComponent(productId)}/remove` },
+      labels: { on: 'Wishlisted', off: 'Add to wishlist' },
+      icon: 'heart',
+    },
+  }),
+};
+```
+
+The admin surface is even stricter: no in-admin module slots exist in v1.0, and when they ship in a future release they will also be data-descriptor-only.
+
+---
+
+### Forgetting idempotency on event handlers
+
+Core event delivery is **at-most-once today** — but don't rely on that. Write handlers to be idempotent so they stay correct if delivery ever becomes at-least-once. A handler that sends an email or mutates data on every delivery will double-send or double-write on any redelivery.
+
+✅ **Right** — key idempotency on `eventId` (the core-assigned, unique-per-emit opaque id), not on the payload value tuple:
+
+```ts
+// From modules/wishlist/src/events/subscriptions.ts
+// Two genuinely distinct price drops of the same magnitude carry different eventIds.
+// Reprocessing the SAME event hits the UNIQUE ledger and is a no-op.
+function defaultDigestRunId(drop: ProductPriceChangedPayload): string {
+  return `price_changed:${drop.eventId}`;
+}
+```
+
+Use the `eventId` as your idempotency key in a `UNIQUE`-constrained ledger table. Do not key on `{ old, new }` value tuples — a flash-sale cycle can produce two distinct events with the same values but different `eventId`s, and you want both to fire.
+
+---
+
+## Manifest validation quick reference
+
+The `parseAndVerifyManifest` function (re-exported from `@sovecom/module-sdk`) is run by core at install time. It enforces:
+
+- Raw manifest ≤ 64 KiB.
+- All top-level keys are known (`.strict()` — unknown keys are rejected).
+- `name` is a lowercase slug (`^[a-z][a-z0-9-]*$`), max 64 chars.
+- `version` is a valid semver string.
+- `compatibleCore` is a valid semver range with the lower-bound major equal to `CORE_API_VERSION`'s major.
+- `permissions` contains only values from the closed allowlist (`MODULE_PERMISSION_ALLOWLIST`).
+- Every entry in `tables` is prefixed exactly `mod_<name>_` with a `[a-z0-9_]+` suffix.
+- Each `slot` is declared at most once per manifest.
+
+Run the same validator in your tests to catch manifest problems before publish:
+
+```ts
+import { parseAndVerifyManifest } from '@sovecom/module-sdk';
+import { readFileSync } from 'fs';
+
+const raw = readFileSync('sovecom.module.json', 'utf8');
+const manifest = parseAndVerifyManifest(raw); // throws with a descriptive message on failure
+```
+
+---
+
+## See also
+
+- [Module Authoring](/guides/modules/) — structure, `defineModule`, the `activate` lifecycle
+- [Custom Endpoints](/guides/custom-endpoints/) — `sdk.serve`, `ModuleHttpRequest`, `ModuleHttpResponse`
+- [Schema Reference](/guides/schema-reference/) — `ModuleSdk`, `TablesClient`, `EmailClient`, `EventsClient`
+- [Security Concepts](/concepts/security/) — trust boundaries, RBAC, tenant isolation
+
+Last updated: 2026-06-25

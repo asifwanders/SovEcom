@@ -1,0 +1,16 @@
+# CODEOWNERS — auto-assign reviewers for pull requests.
+# https://docs.github.com/en/repositories/managing-your-repositories-permissions-and-settings/customizing-your-repository/about-code-owners
+#
+# Stage 1 (founder-led): a single owner reviews everything. As maintainers are
+# added (Stage 2), scope ownership per path here.
+
+# Default owner for everything in the repo
+*       @asifwanders
+
+# Governance & licensing — always owner-reviewed
+/LICENSE                @asifwanders
+/COMMERCIAL-LICENSE.md  @asifwanders
+/GOVERNANCE.md          @asifwanders
+/MAINTAINERS.md         @asifwanders
+/SECURITY.md            @asifwanders
+/.github/               @asifwanders

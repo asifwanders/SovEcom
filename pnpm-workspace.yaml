@@ -1,0 +1,24 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'modules/*'
+  - 'themes/*'
+  - 'docs'
+overrides:
+  # Force multer >=2.2.0 to clear the production DoS advisory (GHSA, vulnerable <2.2.0)
+  # pulled transitively via @nestjs/platform-express, which otherwise resolves to 2.1.1.
+  # (pnpm 11 reads overrides here, not from package.json's "pnpm.overrides".)
+  multer: '>=2.2.0'
+allowBuilds:
+  '@nestjs/core': true
+  esbuild: true
+  sharp: true
+  # @scarf/scarf (pulled transitively via @nestjs/swagger -> swagger-ui-dist) phones
+  # home with install analytics. Block its postinstall — no telemetry by default (EU privacy).
+  '@scarf/scarf': false
+  argon2: true # native module — needs its install build
+  # Pulled transitively by the 3.6b storefront deps (next-intl / react-markdown toolchain).
+  # Both ship prebuilt binaries and our build/test/typecheck pipeline does not need their
+  # postinstall native builds — block them (keeps `pnpm install --frozen-lockfile` exit 0 in CI).
+  '@parcel/watcher': false
+  '@swc/core': false

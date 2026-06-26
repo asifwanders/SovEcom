@@ -1,0 +1,1 @@
+ALTER TABLE "customers" ADD CONSTRAINT "customers_totp_consistency_chk" CHECK ("customers"."totp_enabled" = false OR "customers"."totp_secret" IS NOT NULL);

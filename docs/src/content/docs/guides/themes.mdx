@@ -1,0 +1,624 @@
+---
+title: Theme Authoring Guide
+description: Scaffold, configure, and publish a SovEcom theme from first file to working storefront.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+A SovEcom theme is a **declarative asset** — JSON manifests, JSON page templates, and a settings schema.
+There is no runtime entrypoint, no worker, no capabilities list, and no database tables.
+`defineTheme` validates your configuration at build time using the same schema the core runs at install time, so a misconfigured theme fails fast rather than as an opaque install rejection.
+
+Covers everything from `create-sovecom-theme` to a finished, installable theme.
+The exhaustive slot/widget/manifest contract lives at [/guides/theme-contract/](/guides/theme-contract/); this guide focuses on doing rather than specifying.
+
+---
+
+## Prerequisites
+
+- Node.js LTS and [pnpm](https://pnpm.io/) installed.
+- A running SovEcom API (see [/getting-started/installation/](/getting-started/installation/)).
+- Optional: a running storefront-next instance for live preview (see [/getting-started/first-store/](/getting-started/first-store/)).
+
+---
+
+## 1. Scaffold a new theme
+
+The `create-sovecom-theme` scaffolder emits a minimal, type-safe starter in one command.
+No interactive prompts, no network access.
+
+```bash
+pnpm create sovecom-theme aurora
+```
+
+<Aside type="note">
+  `create-sovecom-theme` and the `@sovecom/theme-sdk` package publish to npm with the SovEcom v1.0 release. Until then they ship only inside the monorepo — scaffold and build from a source checkout, with the SDK referenced as a `workspace:*` dependency.
+</Aside>
+
+To emit the starter into a specific directory:
+
+```bash
+pnpm create sovecom-theme aurora --dir themes/
+```
+
+The scaffolder validates the name against the theme-name slug rule (`^[a-z][a-z0-9-]*$`) and refuses to overwrite a non-empty destination.
+After it runs, install dependencies and type-check:
+
+```bash
+cd aurora
+pnpm install
+pnpm typecheck
+```
+
+`typecheck` runs `tsc --noEmit` over `src/`. A clean typecheck means every `defineTheme` / `defineThemeSlots` / `defineThemeSettings` call compiles against the SDK types and will be accepted by the core at install time.
+
+### Generated file tree
+
+```
+aurora/
+├── package.json
+├── tsconfig.json
+├── sovecom.theme.json          ← the artifact the core ingests
+├── settings.schema.json        ← JSON-schema for admin UI / validation
+└── src/
+    ├── theme.ts                ← typed, build-time-validated manifest
+    ├── slots.ts                ← slot-slug declarations
+    └── settings.ts             ← default settings with autocomplete types
+```
+
+---
+
+## 2. The manifest (`sovecom.theme.json`)
+
+The file the core reads at install time.
+Keep it in sync with `src/theme.ts` — the TypeScript file is the validated authoring view, `sovecom.theme.json` is the shipped artifact.
+
+```json
+{
+  "name": "aurora",
+  "displayName": "aurora",
+  "version": "0.1.0",
+  "compatibleCore": "^1.0.0",
+  "slots": ["product-page"],
+  "settingsSchema": "settings.schema.json"
+}
+```
+
+Fields:
+
+| Field | Required | Rules |
+|-------|----------|-------|
+| `name` | Yes | Lowercase slug (`^[a-z][a-z0-9-]*$`), max 64 chars. Forms the install identity and URL segment. |
+| `displayName` | Yes | Human-readable label, max 128 chars. |
+| `version` | Yes | Valid semver, e.g. `"0.1.0"`. |
+| `compatibleCore` | Yes | Valid semver range, e.g. `"^1.0.0"`. Gated at install against `CORE_API_VERSION`. |
+| `slots` | No | Array of lowercase slug strings, max 64 entries. Declare each slot once. |
+| `settingsSchema` | No | Relative path to a JSON-schema file describing tunable settings, max 256 chars. |
+| `templates` | No | Array of `{ page, path }` declarations; see [§5 Page templates](#5-page-templates). |
+
+<Aside type="caution">
+The manifest is validated with `.strict()` — any unknown top-level key causes install rejection.
+Do not add arbitrary fields.
+</Aside>
+
+### The typed manifest in `src/theme.ts`
+
+`defineTheme` runs the same `parseAndVerifyThemeManifest` the core runs, so validation failures surface as TypeScript errors at build time rather than as API errors at install time:
+
+```ts
+import { defineTheme } from '@sovecom/theme-sdk';
+import { slots } from './slots.js';
+
+export const theme = defineTheme({
+  name: 'aurora',
+  displayName: 'aurora',
+  version: '0.1.0',
+  compatibleCore: '^1.0.0',
+  slots,
+  settingsSchema: 'settings.schema.json',
+});
+
+export default theme;
+```
+
+---
+
+## 3. Slots (`src/slots.ts`)
+
+Slots are **declarative metadata** — they declare which slot slugs your theme renders in its storefront UI.
+The actual slot registry is derived at runtime from enabled modules' manifests.
+`defineThemeSlots` only validates the slug shape and deduplication; it has no network effect.
+
+```ts
+import { defineThemeSlots } from '@sovecom/theme-sdk';
+
+export const slots = defineThemeSlots(['product-page']);
+```
+
+Validation rules enforced by `defineThemeSlots`:
+
+- Each slot must match `^[a-z][a-z0-9-]*$`.
+- Each slug must appear at most once in the array.
+- Throws a descriptive `Error` on the first violation — no silent truncation.
+
+To expose more slots, add them to the array:
+
+```ts
+export const slots = defineThemeSlots([
+  'product-page',
+  'category-sidebar',
+  'cart-upsell',
+]);
+```
+
+The returned array is frozen (`Object.freeze`), so it is safe to spread into the manifest config.
+Drop it directly into `defineTheme({ ..., slots })` as shown in `src/theme.ts`.
+
+---
+
+## 4. Settings (`src/settings.ts` and `settings.schema.json`)
+
+Themes may expose tunable settings — design tokens, chrome flags, and custom author knobs — that admins override via the API or the admin UI.
+
+### TypeScript defaults
+
+`defineThemeSettings` is a compile-time identity helper: it types and returns your defaults object so you get autocomplete over the documented token keys, and a single inferred `ThemeSettingsShape` to reuse elsewhere.
+It has **no runtime behaviour**:
+
+```ts
+import { defineThemeSettings, type KnownThemeSettings } from '@sovecom/theme-sdk';
+
+export const settings = defineThemeSettings<KnownThemeSettings>({
+  // ── design tokens → CSS custom properties ──────────────────────────
+  background: '#ffffff',
+  foreground: '#111111',
+  primary: '#2563eb',
+  primaryHover: '#1d4ed8',
+  primaryActive: '#1e40af',
+  primaryForeground: '#ffffff',
+  accent: '#7c3aed',
+  accentForeground: '#ffffff',
+  ring: '#2563eb',
+  radius: '0.5rem',
+  // System font stacks only — no webfonts / CDN (RGPD requirement).
+  fontSans: "Inter, 'Segoe UI', system-ui, sans-serif",
+  fontHeading: "Inter, 'Segoe UI', system-ui, sans-serif",
+  // ── chrome flags (not CSS vars — read by the layout directly) ──────
+  'header.layout': 'simple',
+  'cart.affordance': 'drawer',
+});
+
+export type ThemeSettingsShape = typeof settings;
+```
+
+### Documented token keys
+
+The storefront maps these `KnownThemeSettings` keys onto CSS custom properties.
+All are optional; unrecognised keys are preserved in the settings bag and ignored by the CSS layer.
+
+| Key | CSS var | Notes |
+|-----|---------|-------|
+| `background` | `--background` | Page background color |
+| `foreground` | `--foreground` | Body text color |
+| `primary` | `--primary` | Brand/primary color |
+| `primaryHover` | `--primary-hover` | Hover state |
+| `primaryActive` | `--primary-active` | Active/pressed state |
+| `primaryForeground` | `--primary-foreground` | Text on a primary surface |
+| `accent` | `--accent` | Accent color |
+| `accentForeground` | `--accent-foreground` | Text on an accent surface |
+| `ring` | `--ring` | Focus ring color |
+| `radius` | `--radius` | Corner radius scale (CSS length) |
+| `fontSans` | `--font-sans` | Base sans font-family stack |
+| `fontHeading` | `--font-heading` | Heading font-family stack |
+| `logoUrl` | *(layout prop)* | Absolute or root-relative logo URL |
+
+**Chrome flags** — not CSS vars; the layout reads them directly:
+
+| Key | Values | Default |
+|-----|--------|---------|
+| `header.layout` | `'simple'` \| `'mega'` | `'simple'` |
+| `cart.affordance` | `'drawer'` \| `'page-link'` | `'drawer'` |
+
+An unknown value for either flag falls back to the default, so adding a new chrome variant is non-breaking.
+
+<Aside>
+Use system font stacks only. The project's RGPD rule prohibits self-hosting or CDN-loading webfont files.
+`fontSans` and `fontHeading` must be stack strings that require no asset (e.g. `"Georgia, 'Times New Roman', serif"`).
+</Aside>
+
+### JSON schema (`settings.schema.json`)
+
+The `settingsSchema` path in the manifest points at a JSON-schema file. The core stores the path **opaque** at install time — it never reads or executes the referenced file during manifest validation. The schema is consumed by the admin UI to render the settings form, and optionally by your own tooling for validation.
+
+The scaffolder emits a starting schema for the two example keys:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "aurora settings",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "primaryColor": {
+      "type": "string",
+      "description": "Primary brand colour, as a CSS hex string.",
+      "default": "#111111"
+    },
+    "showBreadcrumbs": {
+      "type": "boolean",
+      "description": "Whether product pages render breadcrumbs.",
+      "default": true
+    }
+  }
+}
+```
+
+Extend it to cover every key you expose in `src/settings.ts`.
+
+---
+
+## 5. Page templates
+
+Page templates are **declarative JSON documents** — a `page` type plus an ordered list of sections, each a `{ type, settings? }` pair.
+The storefront runtime resolves each `type` against a section registry and renders the sections in order.
+There is no template code: templates are pure data, validated by the same `parseTemplate` pipeline as `defineTemplate`.
+
+### Supported page types
+
+```
+home | product | category | products | search | cart
+```
+
+### Simple flat template (home page)
+
+```json
+{
+  "page": "home",
+  "sections": [
+    { "type": "hero", "settings": { "fullBleed": true } },
+    { "type": "featured-products", "settings": { "limit": 6 } },
+    { "type": "category-list" }
+  ]
+}
+```
+
+### Layout sections with named regions (product page)
+
+The `columns` section is a **layout primitive** — it accepts a `regions` map of named sub-section arrays.
+Nesting depth is capped at 2 levels (a region inside a region), and each section may declare at most 8 regions.
+
+```json
+{
+  "page": "product",
+  "sections": [
+    { "type": "breadcrumbs" },
+    {
+      "type": "columns",
+      "settings": {
+        "containerClass": "grid grid-cols-1 md:grid-cols-2 gap-8",
+        "rightClass": "space-y-6"
+      },
+      "regions": {
+        "left": [{ "type": "product-gallery" }],
+        "right": [
+          { "type": "product-info" },
+          { "type": "variant-selector" }
+        ]
+      }
+    }
+  ]
+}
+```
+
+### Declaring templates in the manifest
+
+Add a `templates` array to `sovecom.theme.json` (and `src/theme.ts`) to wire each template file.
+Each entry is `{ page, path }` where `path` is a safe relative slug path ending in `.json` (no `..`, no leading `/`):
+
+```json
+{
+  "name": "aurora",
+  "displayName": "aurora",
+  "version": "0.1.0",
+  "compatibleCore": "^1.0.0",
+  "slots": ["product-page"],
+  "settingsSchema": "settings.schema.json",
+  "templates": [
+    { "page": "home",    "path": "templates/home.json" },
+    { "page": "product", "path": "templates/product.json" },
+    { "page": "category","path": "templates/category.json" },
+    { "page": "products","path": "templates/products.json" },
+    { "page": "search",  "path": "templates/search.json" },
+    { "page": "cart",    "path": "templates/cart.json" }
+  ]
+}
+```
+
+Each page type may be declared at most once. Absent page types fall back to the `default` template set at render time.
+
+### Validating a template at build time
+
+Use `defineTemplate` to validate a template in TypeScript with the same pipeline the runtime uses:
+
+```ts
+import { defineTemplate } from '@sovecom/theme-sdk';
+
+export const homeTemplate = defineTemplate({
+  page: 'home',
+  sections: [
+    { type: 'hero', settings: { fullBleed: true } },
+    { type: 'featured-products', settings: { limit: 6 } },
+    { type: 'category-list' },
+  ],
+});
+```
+
+`defineTemplate` round-trips the config through `parseTemplate` (serialise → byte-cap check → JSON parse → Zod schema → depth walk), so it throws the same errors the runtime would at install time.
+
+### Section settings and `defineSection`
+
+Use `defineSection` to pin a typed settings shape for editor autocomplete.
+This is a pure no-op at runtime — it returns its argument unchanged:
+
+```ts
+import { defineSection, type SectionDef } from '@sovecom/theme-sdk';
+
+interface HeroSettings {
+  fullBleed?: boolean;
+  heading?: string;
+}
+
+export const heroSection: SectionDef<HeroSettings> = defineSection<HeroSettings>({
+  type: 'hero',
+  settings: { fullBleed: false, heading: 'Welcome' },
+});
+```
+
+---
+
+## 6. Fetching storefront data
+
+Themes do not run server code. The storefront (Next.js) fetches data from the SovEcom Store API; your theme's page templates declare which sections appear and the section components read the data the storefront already fetched.
+
+The two endpoints a theme surfaces are:
+
+| Endpoint | Response type | What it returns |
+|----------|---------------|-----------------|
+| `GET /store/v1/theme` | `ActiveTheme` | `{ name, version, settings }` — the active theme name, version, and the merged settings bag. |
+| `GET /store/v1/slots` | `SlotMap` | `Record<slot, { module, component }>` — cleanly-resolved slot bindings only; conflicts are omitted. |
+
+The TypeScript types for both are exported from `@sovecom/theme-sdk`:
+
+```ts
+import type { ActiveTheme, SlotMap, SlotBinding } from '@sovecom/theme-sdk';
+
+// Example: reading the active theme in a Next.js RSC
+async function getActiveTheme(): Promise<ActiveTheme> {
+  const res = await fetch(`${process.env.API_URL}/store/v1/theme`, {
+    next: { revalidate: 60 },
+  });
+  if (!res.ok) throw new Error('Failed to fetch active theme');
+  return res.json() as Promise<ActiveTheme>;
+}
+
+// Example: reading the slot map
+async function getSlotMap(): Promise<SlotMap> {
+  const res = await fetch(`${process.env.API_URL}/store/v1/slots`, {
+    next: { revalidate: 60 },
+  });
+  if (!res.ok) throw new Error('Failed to fetch slot map');
+  return res.json() as Promise<SlotMap>;
+}
+```
+
+`settings` in `ActiveTheme` is the **merged** bag — live API settings overlaid on your theme's bundled defaults.
+Your storefront components read it to apply design tokens and chrome flags.
+
+For the full Store API reference, see [/api-reference/](/api-reference/).
+For the slot/widget contract (how modules contribute UI into slots), see [/guides/theme-contract/](/guides/theme-contract/).
+
+---
+
+## 7. Preview and switching themes
+
+### Switching themes in development
+
+The active theme name is resolved server-side in this order of precedence:
+
+1. `STOREFRONT_THEME` environment variable (server-only, not exposed to the browser).
+2. The live API theme's `name` field from `GET /store/v1/theme`.
+3. `default`.
+
+To preview your theme without changing the API configuration, start the storefront with:
+
+```bash
+STOREFRONT_THEME=aurora pnpm dev
+```
+
+This forces the storefront to resolve your theme's template set and settings on every request without a rebuild.
+Changing back to the default is a restart with the variable unset.
+
+### Bundled themes as reference implementations
+
+The monorepo ships two bundled themes in `apps/storefront-next/src/themes/`.
+Both use the same section library but compose it differently:
+
+- **`default`** — flat nav, drawer cart, neutral palette, standard PDP layout.
+- **`boutique`** — mega-menu nav, page-link cart, warm editorial palette (ivory/terracotta/gold), system serif headings, full-bleed home hero, all-image grid PDP.
+
+Boutique's settings are defined in `apps/storefront-next/src/themes/boutique/settings.ts` and illustrate every documented `KnownThemeSettings` key as well as the two chrome flags.
+
+---
+
+## 8. Packaging and installing a theme
+
+A theme package is a directory containing at minimum:
+
+- `sovecom.theme.json` — the manifest.
+- Any files declared in `templates[].path`.
+- `settings.schema.json` (if `settingsSchema` is set).
+
+Install via the API:
+
+```bash
+# POST /admin/v1/themes/install  (multipart/form-data, field: file)
+curl -X POST https://your-store.example.com/admin/v1/themes/install \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -F "file=@aurora.tar.gz"
+```
+
+The API enforces:
+
+- The byte cap (`MANIFEST_MAX_BYTES` from `@sovecom/module-sdk`).
+- All manifest schema rules (name slug, semver, slots deduplication, template path safety).
+- A semver major gate: `compatibleCore` must accept `CORE_API_VERSION`.
+
+A theme that passes `pnpm typecheck` in your repo will pass these checks, because `defineTheme` runs the same validator.
+
+---
+
+## 9. Complete example: `aurora` theme
+
+Complete file set for a minimal but fully-declared theme:
+
+**`sovecom.theme.json`**
+
+```json
+{
+  "name": "aurora",
+  "displayName": "Aurora",
+  "version": "0.1.0",
+  "compatibleCore": "^1.0.0",
+  "slots": ["product-page"],
+  "settingsSchema": "settings.schema.json",
+  "templates": [
+    { "page": "home",    "path": "templates/home.json" },
+    { "page": "product", "path": "templates/product.json" }
+  ]
+}
+```
+
+**`src/theme.ts`**
+
+```ts
+import { defineTheme } from '@sovecom/theme-sdk';
+import { slots } from './slots.js';
+
+export const theme = defineTheme({
+  name: 'aurora',
+  displayName: 'Aurora',
+  version: '0.1.0',
+  compatibleCore: '^1.0.0',
+  slots,
+  settingsSchema: 'settings.schema.json',
+  templates: [
+    { page: 'home',    path: 'templates/home.json' },
+    { page: 'product', path: 'templates/product.json' },
+  ],
+});
+
+export default theme;
+```
+
+**`src/slots.ts`**
+
+```ts
+import { defineThemeSlots } from '@sovecom/theme-sdk';
+
+export const slots = defineThemeSlots(['product-page']);
+```
+
+**`src/settings.ts`**
+
+```ts
+import { defineThemeSettings, type KnownThemeSettings } from '@sovecom/theme-sdk';
+
+export const settings = defineThemeSettings<KnownThemeSettings>({
+  background: '#f0f4ff',
+  foreground: '#111827',
+  primary: '#6366f1',
+  primaryHover: '#4f46e5',
+  primaryActive: '#4338ca',
+  primaryForeground: '#ffffff',
+  accent: '#ec4899',
+  accentForeground: '#ffffff',
+  ring: '#6366f1',
+  radius: '0.75rem',
+  fontSans: "'Segoe UI', system-ui, sans-serif",
+  fontHeading: "'Segoe UI', system-ui, sans-serif",
+  'header.layout': 'simple',
+  'cart.affordance': 'drawer',
+});
+
+export type ThemeSettingsShape = typeof settings;
+```
+
+**`templates/home.json`**
+
+```json
+{
+  "page": "home",
+  "sections": [
+    { "type": "hero", "settings": { "fullBleed": true } },
+    { "type": "featured-products", "settings": { "limit": 8 } },
+    { "type": "category-list" }
+  ]
+}
+```
+
+**`templates/product.json`**
+
+```json
+{
+  "page": "product",
+  "sections": [
+    { "type": "breadcrumbs" },
+    {
+      "type": "columns",
+      "settings": {
+        "containerClass": "grid grid-cols-1 md:grid-cols-2 gap-8",
+        "rightClass": "space-y-6"
+      },
+      "regions": {
+        "left": [{ "type": "product-gallery" }],
+        "right": [
+          { "type": "product-info" },
+          { "type": "variant-selector" }
+        ]
+      }
+    }
+  ]
+}
+```
+
+---
+
+## SDK quick reference
+
+All exports come from `@sovecom/theme-sdk`.
+
+| Export | Kind | Use |
+|--------|------|-----|
+| `defineTheme(config)` | Function | Validate + return a typed `ThemeManifest`. Throws on any violation. |
+| `defineThemeSlots(slugs)` | Function | Validate slug shapes + deduplication; return a frozen array for the manifest. |
+| `defineThemeSettings<T>(defaults)` | Function | Identity helper — types defaults object, no runtime effect. |
+| `defineTemplate(config)` | Function | Validate + return a typed `ThemeTemplate`. Throws on any violation. |
+| `defineSection<T>(def)` | Function | Identity helper — types a section definition for editor autocomplete. |
+| `parseAndVerifyThemeManifest(raw)` | Function | Parse + validate a raw manifest JSON string (same pipeline as the core). |
+| `parseTemplate(raw)` | Function | Parse + validate a raw template JSON string. |
+| `ThemeManifest` | Type | The validated manifest shape. |
+| `ThemeTemplate` | Type | The validated template shape (`{ page, sections }`). |
+| `TemplateSection` | Type | A single section (`{ type, settings?, regions? }`). |
+| `PageType` | Type | `'home' \| 'product' \| 'category' \| 'products' \| 'search' \| 'cart'` |
+| `ThemeSettings` | Type | `Record<string, unknown>` — the opaque settings bag. |
+| `KnownThemeSettings` | Type | `DocumentedThemeSettings & ThemeSettings` — documented keys + open record. |
+| `ActiveTheme` | Type | `{ name, version, settings }` — `GET /store/v1/theme` response. |
+| `SlotMap` | Type | `Record<slot, SlotBinding>` — `GET /store/v1/slots` response. |
+| `SlotBinding` | Type | `{ module, component }` — a single resolved slot. |
+| `THEME_SDK_VERSION` | Const | Current SDK package version string. |
+| `CORE_API_VERSION` | Const | The core API version this SDK gates against (re-exported from `@sovecom/module-sdk`). |
+| `assertCoreCompatible(range)` | Function | Assert a `compatibleCore` range accepts `CORE_API_VERSION`; throws if incompatible. |
+
+For the slot-filling and widget descriptor contract that modules use to contribute UI into your theme's declared slots, see [/guides/theme-contract/](/guides/theme-contract/).
+
+Last updated: 2026-06-25

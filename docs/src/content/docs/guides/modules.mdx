@@ -1,0 +1,916 @@
+---
+title: Module Authoring Guide
+description: Build and ship a working SovEcom module from scratch — scaffold, manifest, SDK capabilities, namespaced tables, events, email, HTTP endpoints, and UI slots.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+A SovEcom **module** is a sandboxed Node.js worker that extends the platform without touching core
+code. It has one entry point — `activate(sdk)` — and communicates with core exclusively through the
+`ModuleSdk` capability object. Every call is a gated broker RPC; the permissions you declare in
+`sovecom.module.json` decide what core lets through. Modules cannot weaken or bypass that enforcement.
+
+The shipped `wishlist` module is used as the running example throughout.
+
+**Other docs cover sub-topics — link, don't duplicate:**
+- Permission deep-dive and common mistakes → [/guides/module-security/](/guides/module-security/)
+- Event payloads and schemas → [/guides/webhooks/](/guides/webhooks/)
+- Custom HTTP endpoints via `serve()` → [/guides/custom-endpoints/](/guides/custom-endpoints/)
+- DTO shapes (products, orders, customers) → [/guides/schema-reference/](/guides/schema-reference/)
+- Publishing to npm → [/guides/module-publishing/](/guides/module-publishing/)
+
+---
+
+## Prerequisites
+
+- Node.js LTS (≥ 20)
+- pnpm ≥ 9
+- A running SovEcom API (see [/getting-started/architecture-overview/](/getting-started/architecture-overview/))
+
+<Aside type="note">
+  `create-sovecom-module` and the `@sovecom/*` SDK packages publish to npm with the SovEcom v1.0 release. Until then they ship only inside the monorepo — scaffold and build from a source checkout, with the SDK referenced as a `workspace:*` dependency.
+</Aside>
+
+---
+
+## 1. Scaffold
+
+<Steps>
+
+1. Run the scaffolder from the project root (or any directory):
+
+   ```bash
+   pnpm dlx create-sovecom-module wishlist
+   ```
+
+   Or with an explicit output directory:
+
+   ```bash
+   pnpm dlx create-sovecom-module wishlist --dir ./modules
+   ```
+
+   The module name must be a lowercase slug matching `^[a-z][a-z0-9-]*$` (e.g. `wishlist`,
+   `loyalty-points`). The scaffolder rejects anything else with a clear error message and never
+   clobbers an existing directory.
+
+2. Move into the new directory and install dependencies:
+
+   ```bash
+   cd wishlist
+   pnpm install
+   pnpm build
+   ```
+
+</Steps>
+
+### Generated structure
+
+```
+wishlist/
+├── sovecom.module.json   # manifest — permissions, slots, tables
+├── package.json
+├── tsconfig.json
+└── src/
+    ├── index.ts          # activate(sdk) entry point
+    └── db/
+        └── schema.ts     # namespaced table names
+```
+
+The scaffolder emits exactly this tree with `__MODULE_NAME__` substituted: a minimal, self-contained
+`src/index.ts` plus `src/db/schema.ts`, which typecheck out of the box. The rest of this guide builds
+that starting point out into the fuller layout of the shipped `wishlist` module — `db/repository.ts`,
+`api/handlers.ts`, `events/subscriptions.ts`, `settings.ts`, `slot/wishlist-slot.ts` — adding each
+file as the section that needs it. You create those files yourself; the scaffold does not generate them.
+
+---
+
+## 2. The manifest (`sovecom.module.json`)
+
+Every module ships a `sovecom.module.json` at its root. Core parses and verifies it at install
+time; an invalid manifest is rejected before any code runs.
+
+```json
+{
+  "name": "wishlist",
+  "displayName": "Wishlist",
+  "version": "0.1.0",
+  "compatibleCore": "^1.0.0",
+  "permissions": ["read:products", "write:own_tables", "subscribe:events", "email:send"],
+  "slots": [{ "slot": "product-card-actions", "component": "toggle-button" }],
+  "settings": { "schema": "./settings.schema.json" },
+  "tables": ["mod_wishlist_items", "mod_wishlist_digest_log"]
+}
+```
+
+Source: `modules/wishlist/sovecom.module.json`
+
+### Required fields
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | lowercase slug | Unique module id. Becomes the `mod_<name>_` table prefix and a URL segment. |
+| `displayName` | string | Human-readable label shown in the admin. |
+| `version` | semver | The module's own release version. |
+| `compatibleCore` | semver range | Must satisfy `CORE_API_VERSION` (`1.0.0`) on the same major. `^1.0.0` covers the whole v1 line. |
+| `permissions` | array | The **closed allowlist** of capabilities you need. Default-deny — declare only what you use. |
+
+### Optional fields
+
+| Field | Type | Description |
+|---|---|---|
+| `slots` | `{ slot, component }[]` | Declarative UI slot registrations. See [§ UI slots](#8-ui-slots). |
+| `tables` | `string[]` | Every own table the module uses, for manifest verification. |
+| `settings` | `{ schema: string }` | Path to a JSON Schema file the admin UI uses to render the settings form. |
+
+### The permission allowlist
+
+The full closed set for v1 — declaring anything outside it causes an install-time rejection:
+
+```
+read:products      read:categories    read:orders       read:customers
+write:own_tables   emit:events        subscribe:events
+http:outbound      email:send
+```
+
+<Aside type="caution">
+`register:slot` does not exist. Slots are fully declarative in the manifest — no runtime
+call, no permission gate. Declaring it will cause verification to fail.
+</Aside>
+
+### Semver gate
+
+`compatibleCore` is checked against the constant `CORE_API_VERSION = '1.0.0'` (exported from
+`@sovecom/module-sdk`). The lower bound of your range must share the same major as the installed
+core. A module pinned to `^0.x` or `>=2.0.0` will be refused at load time.
+
+---
+
+## 3. The entry point and `defineModule`
+
+Every module exports a default object with an `activate(sdk)` function. Use `defineModule` from
+`@sovecom/module-sdk` — it validates the shape at build time so a misconfigured module fails fast
+rather than as an opaque worker crash.
+
+```ts
+// src/index.ts (wishlist)
+import { defineModule } from '@sovecom/module-sdk';
+import { MIGRATION_STATEMENTS } from './db/schema';
+import { WishlistRepository } from './db/repository';
+import { handleRequest } from './api/handlers';
+import { registerSubscriptions } from './events/subscriptions';
+import { resolveSettings } from './settings';
+
+export default defineModule({
+  async activate(sdk) {
+    const settings = resolveSettings(undefined); // safe defaults until runtime threads settings
+
+    // Run idempotent migrations on every worker start.
+    for (const sql of MIGRATION_STATEMENTS) {
+      await sdk.tables.exec(sql);
+    }
+
+    const repo = new WishlistRepository(sdk.tables);
+
+    // Subscribe to core events (requires subscribe:events).
+    await registerSubscriptions(sdk.events, {
+      priceDrop: { digest: { repo, email: sdk.email, settings } },
+    });
+
+    // Mount the HTTP handler (requires no extra permission).
+    sdk.serve((req) => handleRequest(req, { repo, store: sdk.store, settings }));
+  },
+});
+```
+
+Source: `modules/wishlist/src/index.ts`
+
+**Rules for `activate`:**
+- Register all `sdk.events.on(...)` calls during `activate`. Core re-sends the subscription set to
+  the broker on each call; handlers registered after `activate` resolves will be missed.
+- Call `sdk.serve(handler)` at most once. The last call wins.
+- The function may be `async` and return a `Promise<void>`.
+
+---
+
+## 4. Namespaced tables (`write:own_tables`)
+
+Modules store data in their own namespaced PostgreSQL tables. The namespace rule is a hard
+constraint enforced at two places:
+
+1. **Manifest schema** — every name in `tables` must match `mod_<name>_<suffix>`.
+2. **`createNamespacedTable`** — the SDK helper that builds the correct name at author time.
+
+```ts
+// src/db/schema.ts (wishlist)
+import { createNamespacedTable } from '@sovecom/module-sdk';
+
+export const ITEMS_TABLE = createNamespacedTable('wishlist', 'items');
+// → 'mod_wishlist_items'
+
+export const DIGEST_LOG_TABLE = createNamespacedTable('wishlist', 'digest_log');
+// → 'mod_wishlist_digest_log'
+
+export const MIGRATION_STATEMENTS: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS ${ITEMS_TABLE} (
+     id text PRIMARY KEY,
+     customer_id text NOT NULL,
+     product_variant_id text NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     UNIQUE (customer_id, product_variant_id)
+   )`,
+  `CREATE INDEX IF NOT EXISTS mod_wishlist_items_customer_idx
+     ON ${ITEMS_TABLE} (customer_id)`,
+  `CREATE TABLE IF NOT EXISTS ${DIGEST_LOG_TABLE} (
+     id text PRIMARY KEY,
+     customer_id text NOT NULL,
+     product_variant_id text NOT NULL,
+     digest_run_id text NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     UNIQUE (customer_id, product_variant_id, digest_run_id)
+   )`,
+];
+```
+
+Source: `modules/wishlist/src/db/schema.ts`
+
+`createNamespacedTable(moduleName, suffix)` throws if `moduleName` is not a valid slug or `suffix`
+is not `[a-z0-9_]+`. The suffix must not begin with `mod_`.
+
+### Querying your tables
+
+Use `sdk.tables.query` for reads and `sdk.tables.exec` for writes. Both accept a SQL string and a
+params array. **Always use bound params — never interpolate user input into SQL.**
+
+```ts
+// sdk.tables.query — SELECT or any statement that returns rows.
+const { rows } = await sdk.tables.query<{ id: string; customer_id: string }>(
+  `SELECT id, customer_id FROM ${ITEMS_TABLE} WHERE customer_id = $1 ORDER BY created_at DESC`,
+  [customerId],
+);
+
+// sdk.tables.exec — INSERT / UPDATE / DELETE.
+// Use RETURNING <col> so rowCount reflects affected rows, not a constant 0.
+const { rows: deleted } = await sdk.tables.exec(
+  `DELETE FROM ${ITEMS_TABLE}
+   WHERE customer_id = $1 AND product_variant_id = $2
+   RETURNING id`,
+  [customerId, productVariantId],
+);
+const wasDeleted = deleted.length > 0;
+```
+
+Source: `modules/wishlist/src/db/repository.ts`
+
+<Aside type="caution">
+`sdk.tables.exec` reports `rowCount` as the number of rows **returned**, not the number of rows
+affected. An `INSERT … ON CONFLICT DO NOTHING` that changes one row returns `rowCount: 0` because
+nothing was returned. Add `RETURNING id` whenever you need to know whether a mutation landed.
+</Aside>
+
+### `TablesClient` interface
+
+```ts
+interface TablesClient {
+  query<T = Record<string, unknown>>(
+    sql: string,
+    params?: ReadonlyArray<string | number | boolean | null>,
+  ): Promise<{ rows: T[]; rowCount: number }>;
+
+  exec(
+    sql: string,
+    params?: ReadonlyArray<string | number | boolean | null>,
+  ): Promise<{ rows: Array<Record<string, unknown>>; rowCount: number }>;
+}
+```
+
+Source: `packages/module-sdk/src/capabilities.ts`
+
+---
+
+## 5. Reading core data
+
+### Catalog — `sdk.store` (`read:products`, `read:categories`)
+
+```ts
+// list products (up to 50 per page)
+const page = await sdk.store.products.list({ limit: 50, cursor: req.query.cursor as string });
+// page.items: ModuleProductDto[]
+// page.nextCursor: string | undefined
+
+// get a single product
+const product = await sdk.store.products.get(productId);
+// product: ModuleProductDto | null
+```
+
+`ModuleProductDto` shape:
+
+```ts
+interface ModuleProductDto {
+  readonly id: string;
+  readonly slug: string;
+  readonly title: string;
+  readonly status: string;
+  readonly category?: { id: string; slug: string; name: string };
+}
+```
+
+Categories follow the same pattern via `sdk.store.categories`.
+
+### Orders and customers — `sdk.admin` (`read:orders`, `read:customers`)
+
+```ts
+const orders = await sdk.admin.orders.list({ limit: 20 });
+// orders.items: ModuleOrderDto[]
+
+const order = await sdk.admin.orders.get(orderId);
+// order: ModuleOrderDto | null
+```
+
+`ModuleOrderDto` carries `{ id, number, status, totalMinor, currency, createdAt }`.
+
+`ModuleCustomerDto` is **field-limited by design** — it carries `{ id, displayName, locale,
+createdAt }` and no email, phone, or address. This is the privacy boundary: `read:customers` must
+not hand modules raw PII.
+
+### Purchase gate — `sdk.commerce` (`read:orders`)
+
+A boolean-only check that lets a module ask "did this customer buy this product?" without
+receiving any order data.
+
+```ts
+const bought = await sdk.commerce.hasPurchased(customerId, productId);
+// bought: boolean
+```
+
+The query is tenant-scoped from the broker context (never module input) and runs against
+paid/fulfilled orders only. The `reviews` module uses this to gate who may post a review.
+
+Source: `packages/module-sdk/src/capabilities.ts`
+
+---
+
+## 6. Events (`subscribe:events`, `emit:events`)
+
+### Subscribing
+
+Call `sdk.events.on(event, handler)` **during `activate`**. The broker re-sends the full
+subscription set on each call, so all handlers must be registered before `activate` resolves.
+
+```ts
+// subscribe:events — react to a core event.
+await sdk.events.on('product.price_changed', async (payload) => {
+  // Always validate: payload arrives over RPC and is never trusted by shape.
+  const p = payload as Record<string, unknown>;
+  if (typeof p.variantId !== 'string') return;
+  // ... act on the price change
+});
+
+await sdk.events.on('product.updated', (payload) => {
+  // lightweight signal — log-only
+});
+```
+
+### Typed observational payloads
+
+The SDK exports typed payload interfaces for the two observational commerce events:
+
+```ts
+import type { ProductPriceChangedPayload, ProductStockChangedPayload } from '@sovecom/module-sdk';
+
+// product.price_changed
+interface ProductPriceChangedPayload {
+  readonly eventId: string;      // unique per emit — use as idempotency key
+  readonly productId: string;
+  readonly variantId: string;
+  readonly oldPriceMinor: number;
+  readonly newPriceMinor: number;
+  readonly currency: string;
+}
+
+// product.stock_changed
+interface ProductStockChangedPayload {
+  readonly eventId: string;
+  readonly productId: string;
+  readonly variantId: string;
+  readonly available: boolean;   // true = back in stock, false = went out of stock
+}
+```
+
+`eventId` is assigned by core and is unique per emit. Use it as the idempotency key — two
+genuinely distinct events always carry different `eventId`s, so keying on it deduplicates
+redelivery without merging real events that share the same values.
+
+Source: `packages/module-sdk/src/events.ts`
+
+### Emitting module events (`emit:events`)
+
+```ts
+await sdk.events.emit('price-alert-sent', { customerId, variantId });
+// Delivered to other subscribed modules as: mod.<thisModule>.price-alert-sent
+```
+
+### Idempotency pattern
+
+Event delivery is at-most-once today but modules should be written for at-least-once. A
+UNIQUE-constrained ledger table combined with `ON CONFLICT DO NOTHING RETURNING id` is the
+standard pattern (see `mod_wishlist_digest_log` in [§ 4](#4-namespaced-tables-writeown_tables)).
+
+The wishlist event handler in full:
+
+```ts
+// modules/wishlist/src/events/subscriptions.ts (excerpt)
+import type { EventsClient, ProductPriceChangedPayload } from '@sovecom/module-sdk';
+
+function readPriceDrop(payload: unknown): ProductPriceChangedPayload | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const p = payload as Record<string, unknown>;
+  if (typeof p.eventId !== 'string' || p.eventId.length === 0) return null;
+  if (typeof p.variantId !== 'string' || p.variantId.length === 0) return null;
+  if (typeof p.oldPriceMinor !== 'number' || !Number.isInteger(p.oldPriceMinor)) return null;
+  if (typeof p.newPriceMinor !== 'number' || !Number.isInteger(p.newPriceMinor)) return null;
+  if (typeof p.currency !== 'string' || p.currency.length === 0) return null;
+  if (!(p.newPriceMinor < p.oldPriceMinor)) return null; // only real drops
+  return p as unknown as ProductPriceChangedPayload;
+}
+
+export async function registerSubscriptions(events: EventsClient, /* … */): Promise<void> {
+  await events.on('product.price_changed', async (payload) => {
+    const drop = readPriceDrop(payload);
+    if (!drop) return; // malformed or not a drop — idempotent no-op
+    // … run digest
+  });
+}
+```
+
+Source: `modules/wishlist/src/events/subscriptions.ts`
+
+---
+
+## 7. Email (`email:send`)
+
+The module never sees SMTP credentials or core's transactional templates. Two methods are
+available on `sdk.email`:
+
+### `send` — supply an explicit recipient address
+
+```ts
+const result = await sdk.email.send({
+  to: 'shopper@example.com',   // single address, no CR/LF/comma/semicolon, ≤ 254 chars
+  subject: 'Your order is ready',   // no CR/LF, ≤ 200 chars
+  text: 'Plain-text body.',    // required, ≤ 50 000 chars
+  html: '<p>HTML body.</p>',   // optional, ≤ 100 000 chars
+});
+// result.queued === true on success; rejects on error.
+```
+
+### `sendToCustomer` — privacy-preserving variant
+
+The module supplies only the opaque `customerId`. Core resolves the recipient, honours
+`accepts_marketing` and RGPD erasure, and either sends or silently suppresses. The module
+learns only whether the message was queued — never the address or the suppression reason.
+
+```ts
+const result = await sdk.email.sendToCustomer({
+  customerId: 'cus_abc123',    // opaque uuid; core resolves the recipient
+  subject: 'Price drop on your wishlist',
+  text: '…',
+  html: '…',                   // optional
+});
+// result.queued === true  → queued by core
+// result.queued === false → suppressed (no consent / erased / missing); reason is opaque
+```
+
+Source: `packages/module-sdk/src/email.ts`
+
+### Error handling
+
+```ts
+import { RpcErrorCode } from '@sovecom/module-sdk';
+
+try {
+  await sdk.email.sendToCustomer({ customerId, subject, text });
+} catch (err) {
+  const code = (err as { code?: string }).code;
+  if (code === RpcErrorCode.RATE_LIMITED) {
+    // module has hit its per-module email rate limit — back off
+  }
+  if (code === RpcErrorCode.FORBIDDEN) {
+    // email:send not declared in manifest, or tenant has disabled outbound email
+  }
+}
+```
+
+The wishlist module's digest implements a claim/rollback pattern — it records the idempotency
+claim *before* sending, and rolls it back only for `FORBIDDEN | PROTOCOL | RATE_LIMITED` (codes
+where the message definitely never left core). A `HANDLER_ERROR` is treated as possibly-delivered
+and the claim is kept, biasing toward no-duplicate over a possible double promotional send.
+
+Source: `modules/wishlist/src/digest/digest.ts`
+
+---
+
+## 8. Outbound HTTP (`http:outbound`)
+
+`sdk.http.fetch` is a mediated, SSRF-guarded outbound fetch. Core validates the target URL and
+blocks RFC-1918 / loopback destinations.
+
+```ts
+const response = await sdk.http.fetch({
+  url: 'https://api.example.com/notify',
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ event: 'order.paid', orderId }),
+});
+// response: { status: number; headers: Record<string, string>; body: string }
+```
+
+Source: `packages/module-sdk/src/capabilities.ts`
+
+See [/guides/custom-endpoints/](/guides/custom-endpoints/) for the full policy (allowed
+protocols, blocked ranges, header restrictions).
+
+---
+
+## 9. Custom HTTP endpoints (`sdk.serve`)
+
+Register an HTTP handler with `sdk.serve(handler)`. Core mounts it at:
+
+```
+/store/v1/modules/<name>/*    (public, optional customer-auth guard)
+/admin/v1/modules/<name>/*    (RBAC-gated)
+```
+
+The handler receives a `ModuleHttpRequest` and must return a `ModuleHttpResponse`.
+
+```ts
+// packages/module-sdk/src/http.ts (interface excerpt)
+interface ModuleHttpRequest {
+  readonly surface: 'store' | 'admin';
+  readonly method: string;
+  readonly path: string;    // path UNDER the module mount, e.g. '/items/42'
+  readonly query: Record<string, string | string[]>;
+  readonly headers: Record<string, string>;
+  readonly body?: string;
+  readonly tenantId: string;
+  readonly customer?: { readonly id: string }; // core-verified; never from client input
+}
+
+interface ModuleHttpResponse {
+  readonly status: number;
+  readonly headers?: Record<string, string>;
+  readonly body?: string;
+}
+```
+
+A minimal handler:
+
+```ts
+sdk.serve(async (req) => {
+  if (req.method === 'GET' && req.path === '/items') {
+    const { rows } = await sdk.tables.query(`SELECT id FROM ${ITEMS_TABLE} LIMIT 50`);
+    return {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(rows),
+    };
+  }
+  return { status: 404, body: 'not found' };
+});
+```
+
+### Customer identity
+
+`req.customer` is set **only by core** from a JWT it verified. Never read the customer id from
+`req.body`, `req.query`, or `req.headers`. Return 401 when `req.customer` is absent on any
+route that requires a logged-in shopper:
+
+```ts
+// modules/wishlist/src/api/handlers.ts (excerpt)
+function requireCustomerId(req: ModuleHttpRequest): string | null {
+  const id = req.customer?.id;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+// usage inside a handler:
+const customerId = requireCustomerId(req);
+if (!customerId) return json(401, { error: 'login_required' });
+```
+
+Source: `modules/wishlist/src/api/handlers.ts`
+
+See [/guides/custom-endpoints/](/guides/custom-endpoints/) for the full routing reference,
+response size limits, and allowed header policy.
+
+---
+
+## 10. UI slots
+
+Slots let a module contribute a widget to a named storefront location. The mechanism has two
+parts:
+
+1. **Manifest declaration** (static) — the module declares which slot it fills and what
+   component id maps to it.
+2. **Slot data endpoint** (runtime) — the module serves a typed widget descriptor over its
+   existing store mount; the storefront renders it.
+
+### Manifest declaration
+
+```json
+{
+  "slots": [
+    { "slot": "product-card-actions", "component": "toggle-button" }
+  ]
+}
+```
+
+`slot` is the named storefront location. `component` is the component id the storefront maps to
+its own UI component. Both must be lowercase slugs. A module may fill each slot at most once.
+
+The `defineSlots` helper validates the same rules at author time:
+
+```ts
+import { defineSlots } from '@sovecom/module-sdk';
+
+// Use the output verbatim in your manifest — this is a build-time validation tool, not a
+// runtime registration.
+const slots = defineSlots([
+  { slot: 'product-card-actions', component: 'toggle-button' },
+]);
+```
+
+Source: `packages/module-sdk/src/slots.ts`
+
+### Slot data endpoint
+
+The module serves widget descriptors over `GET /slot?slot=<name>&route=<productId>`. Core and
+the storefront call this on every page render for slots the module fills.
+
+```ts
+// modules/wishlist/src/slot/wishlist-slot.ts (excerpt)
+export const WISHLIST_SLOT = 'product-card-actions';
+
+export async function handleWishlistSlot(
+  req: ModuleHttpRequest,
+  repo: WishlistRepository,
+): Promise<ModuleHttpResponse> {
+  if (firstQuery(req.query.slot) !== WISHLIST_SLOT) return { status: 204 };
+
+  const productId = readRouteProductId(req); // validated, length-bounded
+  if (!productId) return { status: 204 };
+
+  const customerId = req.customer?.id;
+  if (!customerId) return { status: 204 }; // anonymous → decline (204 = no widget)
+
+  const initialOn = await repo.has(customerId, productId);
+  const seg = encodeURIComponent(productId);
+
+  const descriptor = {
+    type: 'toggle-button',
+    props: {
+      initialOn,
+      onAction:  { path: `/store/v1/modules/wishlist/items/${seg}/add` },
+      offAction: { path: `/store/v1/modules/wishlist/items/${seg}/remove` },
+      labels: { on: 'In your wishlist', off: 'Add to wishlist' },
+      icon: 'heart',
+    },
+  };
+  return {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(descriptor),
+  };
+}
+```
+
+Source: `modules/wishlist/src/slot/wishlist-slot.ts`
+
+A **204** response means "no widget for this context" — the storefront renders nothing and the
+slot is skipped silently. Return 204 for anonymous visitors on personalized slots, or when
+`req.query.slot` does not match the slot this endpoint handles.
+
+Wire the slot endpoint in your main handler:
+
+```ts
+if (req.method === 'GET' && req.path === '/slot') {
+  return handleWishlistSlot(req, repo);
+}
+```
+
+---
+
+## 11. Module settings
+
+Declare a settings schema reference in the manifest:
+
+```json
+{
+  "settings": { "schema": "./settings.schema.json" }
+}
+```
+
+The schema is a JSON Schema Draft-07 file the admin UI uses to render a settings form. Example
+(`modules/wishlist/settings.schema.json`):
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Wishlist module settings",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Master on/off. When false the module's endpoints return 404."
+    },
+    "maxItemsPerCustomer": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 100,
+      "description": "Hard cap on wishlist items per customer."
+    },
+    "weeklyDigest": {
+      "type": "boolean",
+      "default": false,
+      "description": "Opt-in to the weekly price-drop email digest."
+    }
+  }
+}
+```
+
+Until the runtime threads the settings bag into `activate(sdk)`, parse it defensively with safe
+defaults:
+
+```ts
+// modules/wishlist/src/settings.ts (excerpt)
+export function resolveSettings(raw: unknown): WishlistSettings {
+  const bag = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const enabled =
+    typeof bag.enabled === 'boolean' ? bag.enabled : true;
+  const weeklyDigest =
+    typeof bag.weeklyDigest === 'boolean' ? bag.weeklyDigest : false;
+  let maxItemsPerCustomer =
+    typeof bag.maxItemsPerCustomer === 'number'
+      ? Math.floor(bag.maxItemsPerCustomer)
+      : 100;
+  if (maxItemsPerCustomer < 1) maxItemsPerCustomer = 1;
+  if (maxItemsPerCustomer > 1000) maxItemsPerCustomer = 1000;
+  return { enabled, maxItemsPerCustomer, weeklyDigest };
+}
+```
+
+Source: `modules/wishlist/src/settings.ts`
+
+---
+
+## 12. Error handling — `RpcErrorCode`
+
+The SDK exports a stable set of error codes you can branch on:
+
+```ts
+import { RpcErrorCode } from '@sovecom/module-sdk';
+
+// RpcErrorCode values:
+// 'unknown_method'  — broker has no handler for the method
+// 'timeout'         — request timed out
+// 'handler_error'   — handler threw
+// 'channel_closed'  — channel closed before response
+// 'protocol'        — params/result failed validation
+// 'forbidden'       — permission denied or transactional-path guard
+// 'not_available'   — capability exists in vocabulary but not yet implemented
+// 'busy'            — inbound RPC concurrency cap hit; back off and retry
+// 'rate_limited'    — per-module capability rate limit exceeded (email:send)
+```
+
+Read the code from the thrown error object:
+
+```ts
+const code = (err as { code?: string }).code;
+if (code === RpcErrorCode.FORBIDDEN) { /* … */ }
+if (code === RpcErrorCode.RATE_LIMITED) { /* … */ }
+```
+
+Source: `packages/module-sdk/src/errors.ts`
+
+---
+
+## 13. SDK surface at a glance
+
+All capabilities on `ModuleSdk`:
+
+| Property / method | Permission | What it does |
+|---|---|---|
+| `sdk.store.products.list(query?)` | `read:products` | Paginated catalog read |
+| `sdk.store.products.get(id)` | `read:products` | Single product lookup |
+| `sdk.store.categories.list(query?)` | `read:categories` | Paginated category read |
+| `sdk.store.categories.get(id)` | `read:categories` | Single category lookup |
+| `sdk.admin.orders.list(query?)` | `read:orders` | Paginated order read |
+| `sdk.admin.orders.get(id)` | `read:orders` | Single order lookup |
+| `sdk.admin.customers.list(query?)` | `read:customers` | Paginated customer read (field-limited) |
+| `sdk.admin.customers.get(id)` | `read:customers` | Single customer lookup (field-limited) |
+| `sdk.commerce.hasPurchased(customerId, productId)` | `read:orders` | Boolean purchase gate |
+| `sdk.tables.query(sql, params?)` | `write:own_tables` | SELECT against own tables |
+| `sdk.tables.exec(sql, params?)` | `write:own_tables` | Mutation against own tables |
+| `sdk.events.on(event, handler)` | `subscribe:events` | Subscribe to a core or module event |
+| `sdk.events.emit(event, payload?)` | `emit:events` | Emit a module event |
+| `sdk.http.fetch(request)` | `http:outbound` | Mediated outbound HTTP (SSRF-guarded) |
+| `sdk.email.send(message)` | `email:send` | Outbound email to an explicit address |
+| `sdk.email.sendToCustomer(message)` | `email:send` | Privacy-preserving email by customer id |
+| `sdk.serve(handler)` | _(none)_ | Register the module's HTTP handler |
+
+Source: `packages/module-sdk/src/capabilities.ts`, `packages/module-sdk/src/index.ts`
+
+---
+
+## 14. Full `package.json` and `tsconfig.json`
+
+The scaffolder generates these directly — copy them as-is for a new module.
+
+```json
+{
+  "name": "wishlist",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A SovEcom module.",
+  "license": "AGPL-3.0-only",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@sovecom/module-sdk": "^0.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.4.0"
+  }
+}
+```
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "types": ["node"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "resolveJsonModule": true,
+    "noUncheckedIndexedAccess": true
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}
+```
+
+Sources: `packages/create-sovecom-module/templates/package.json.tmpl`,
+`packages/create-sovecom-module/templates/tsconfig.json.tmpl`
+
+---
+
+## 15. Install a module
+
+Once the module is built and published (or path-linked for local development), install it from
+the admin dashboard or the CLI:
+
+```bash
+# from the API app directory
+pnpm sovecom modules install ./path/to/my-module
+# or from npm
+pnpm sovecom modules install @acme/my-sovecom-module
+```
+
+Core verifies the manifest, checks `compatibleCore`, enforces the permission allowlist, and
+registers the module's tables and slot declarations before the worker starts.
+
+See [/guides/module-publishing/](/guides/module-publishing/) for packaging and npm publish steps.
+
+---
+
+## Quick checklist
+
+Before shipping a module, verify:
+
+- [ ] `sovecom.module.json` `name` is a lowercase slug and unique.
+- [ ] `compatibleCore` starts on the same major as `CORE_API_VERSION` (`1.0.0`).
+- [ ] Every permission in `permissions` is actually used; remove any you don't call.
+- [ ] Every table name in `tables` matches `mod_<name>_<suffix>` exactly.
+- [ ] All SQL uses bound params — no string concatenation of user input.
+- [ ] Customer id read exclusively from `req.customer.id` (never from body/query/headers).
+- [ ] `sdk.events.on(...)` calls are all inside `activate`, not deferred.
+- [ ] `sdk.serve(handler)` is called at most once.
+- [ ] `sdk.tables.exec` mutations use `RETURNING <col>` when you need to confirm a row was changed.
+- [ ] Module builds clean (`pnpm typecheck` passes with zero errors).
+
+---
+
+Last updated: 2026-06-25

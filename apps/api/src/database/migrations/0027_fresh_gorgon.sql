@@ -1,0 +1,2 @@
+ALTER TABLE "customers" ADD COLUMN "locale" text;--> statement-breakpoint
+ALTER TABLE "customers" ADD CONSTRAINT "customers_locale_chk" CHECK ("customers"."locale" is null or char_length("customers"."locale") = 2);

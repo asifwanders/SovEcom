@@ -1,0 +1,52 @@
+name: Supply Chain Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly on Monday at 04:15 UTC
+    - cron: '15 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  # Secret scanning via Gitleaks — blocks on any detected secret pattern.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: gitleaks-action v2 requires a (free) license for private-org repos.
+          # Set the GITLEAKS_LICENSE repo secret to silence the notice; scanning runs regardless.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  # Generate a CycloneDX SBOM for the full workspace and upload as a CI artifact.
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate CycloneDX SBOM
+        # cdxgen reads pnpm-lock.yaml + the installed node_modules natively.
+        # (@cyclonedx/cyclonedx-npm only understands npm's package-lock.json, which
+        # a pnpm workspace never produces.)
+        run: pnpm dlx @cyclonedx/cdxgen@11 --type pnpm --output sbom.cdx.json
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          retention-days: 90

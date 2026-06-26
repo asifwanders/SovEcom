@@ -1,0 +1,50 @@
+{
+  "name": "sovecom",
+  "version": "0.0.1",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@11.4.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "clean": "turbo clean && rm -rf node_modules",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "pack:bundled-modules": "node scripts/pack-bundled-modules.mjs",
+    "bench": "node scripts/benchmarks/run.mjs",
+    "bench:full": "bash scripts/benchmarks/bench.sh",
+    "bench:check": "node --test scripts/benchmarks/*.test.mjs",
+    "prepare": "husky",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:publish": "changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.0",
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0",
+    "@sovecom/eslint-config": "workspace:*",
+    "autocannon": "^8.0.0",
+    "eslint": "^8.57.0",
+    "husky": "^9.1.0",
+    "lint-staged": "^15.2.0",
+    "prettier": "^3.2.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}

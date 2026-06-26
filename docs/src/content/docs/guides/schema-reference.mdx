@@ -1,0 +1,356 @@
+---
+title: Database Schema Reference
+description: The field-limited DTOs and namespaced table API that modules can read and own — not the raw core database.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="caution">
+This page documents the **module-visible data surface** — the field-limited DTOs exposed through
+the SDK and the namespaced tables a module owns. It is **not** the raw SovEcom database schema.
+Modules never touch core tables directly. Raw tables such as `orders`, `customers`, `products`,
+and the rest of `apps/api/src/database/schema/` are invisible and inaccessible to modules.
+All data crosses the boundary as typed DTOs through the broker, with permission checks enforced
+by the core runtime before any row is returned.
+</Aside>
+
+## How the boundary works
+
+When a module calls `sdk.store.products.list()` or `sdk.admin.orders.get(id)`, the request goes
+through the **broker RPC** inside core. The broker:
+
+1. Checks the module's declared `permissions` in `sovecom.module.json` against the required gate.
+2. Scopes the query to the current tenant — the module cannot influence this.
+3. Returns a **DTO** — a deliberately narrow projection that may omit columns present in the raw
+   table (for example, `read:customers` returns no email, phone, or address).
+
+The DTO types in `packages/module-sdk/src/dto.ts` are the privacy boundary by construction: a
+field that does not appear in the DTO cannot be leaked, regardless of what the broker query does
+internally.
+
+See [Module Security & Permissions](/guides/module-security/) for the full permission-gate model.
+
+---
+
+## Readable DTOs
+
+The sections below enumerate each DTO verbatim from `packages/module-sdk/src/dto.ts`, the
+required permission, and the SDK accessor.
+
+### Pagination helpers
+
+All list calls accept a `ListQuery` and return a `ListResult<T>`.
+
+**`ListQuery`**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `limit` | `number` | Required. The broker validates and bounds this value. |
+| `cursor` | `string` | Optional. Opaque cursor from a previous `nextCursor`. |
+
+**`ListResult<T>`**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `items` | `readonly T[]` | The page of results. |
+| `nextCursor` | `string` | Optional. Present when more pages exist. |
+
+---
+
+### Products — `ModuleProductDto`
+
+**Permission required:** `read:products`
+
+**SDK accessor:** `sdk.store.products.list(query?)` / `sdk.store.products.get(id)`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | `string` | Opaque product id. |
+| `slug` | `string` | URL-friendly product slug. |
+| `title` | `string` | Display title. |
+| `status` | `string` | Publication status (e.g. `draft`, `published`, `archived`). |
+| `category` | `ModuleProductCategory \| undefined` | Primary category. Omitted when the product has no category. Rides the same `read:products` grant — no extra permission needed. |
+
+**`ModuleProductCategory`** (nested, read-only):
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | `string` | Category id. |
+| `slug` | `string` | Category slug. |
+| `name` | `string` | Display name. |
+
+`category` is the product's **primary category** — the lowest-`position`, id-tiebroken row of its
+`product_categories` links, projected to the same `{ id, slug, name }` shape as
+`ModuleCategoryDto`. A module can filter or exclude by category without a separate read port.
+
+Raw columns such as `description_html`, `price`, `compare_at_price`, `tax_class`, `weight`, or
+`vendor` are **not** in this DTO.
+
+---
+
+### Categories — `ModuleCategoryDto`
+
+**Permission required:** `read:categories`
+
+**SDK accessor:** `sdk.store.categories.list(query?)` / `sdk.store.categories.get(id)`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | `string` | Opaque category id. |
+| `slug` | `string` | URL-friendly category slug. |
+| `name` | `string` | Display name. |
+
+---
+
+### Orders — `ModuleOrderDto`
+
+**Permission required:** `read:orders`
+
+**SDK accessor:** `sdk.admin.orders.list(query?)` / `sdk.admin.orders.get(id)`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | `string` | Opaque order id. |
+| `number` | `string` | Human-readable order number. |
+| `status` | `string` | Order status (e.g. `paid`, `fulfilled`, `cancelled`). |
+| `totalMinor` | `number` | Order total in the smallest currency unit (integer cents). |
+| `currency` | `string` | ISO 4217 currency code, e.g. `EUR`. |
+| `createdAt` | `string` | ISO 8601 creation timestamp. |
+
+Raw columns such as `customer_id`, `shipping_address`, `billing_address`, `tax_amount`,
+`stripe_payment_intent_id`, and `line_items` are **not** in this DTO.
+
+#### Commerce boolean — `hasPurchased`
+
+For cases where a module only needs to know whether a customer bought a product (e.g. a review
+gate), use the `commerce` client rather than iterating orders:
+
+```ts
+const bought = await sdk.commerce.hasPurchased(customerId, productId);
+```
+
+This returns a bare `boolean` — no order rows cross the boundary. It is gated by the same
+`read:orders` permission. The query runs against paid/fulfilled orders only and is always
+tenant-scoped by the broker.
+
+---
+
+### Customers — `ModuleCustomerDto`
+
+**Permission required:** `read:customers`
+
+**SDK accessor:** `sdk.admin.customers.list(query?)` / `sdk.admin.customers.get(id)`
+
+<Aside type="caution">
+`ModuleCustomerDto` is deliberately **field-limited**. It carries **no email,
+phone, address, or VAT** fields. Widening the customer surface requires a future explicit
+PII sub-permission with its own DTO and broker port. Do not attempt to reconstruct PII from this
+DTO — the fields are absent by construction, not by accident.
+</Aside>
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | `string` | Opaque customer id. |
+| `displayName` | `string` | Display name (first + last, or a fallback). |
+| `locale` | `string \| null` | BCP 47 locale preference, e.g. `fr-FR`. `null` when not set. |
+| `createdAt` | `string` | ISO 8601 registration timestamp. |
+
+Raw columns such as `email`, `phone`, `accepts_marketing`, `billing_address`, `deleted_at`, and
+`anonymized_at` are **not** in this DTO.
+
+#### Privacy-preserving customer email
+
+If you need to email a customer and hold only their opaque `id`, use `sdk.email.sendToCustomer`.
+The module supplies no address and never receives one. See [Outbound email](#outbound-email) below.
+
+---
+
+## Permission → DTO map
+
+| Permission | DTO(s) unlocked | SDK path |
+|------------|-----------------|----------|
+| `read:products` | `ModuleProductDto`, `ModuleProductCategory` | `sdk.store.products` |
+| `read:categories` | `ModuleCategoryDto` | `sdk.store.categories` |
+| `read:orders` | `ModuleOrderDto`, `hasPurchased` boolean | `sdk.admin.orders`, `sdk.commerce` |
+| `read:customers` | `ModuleCustomerDto` (field-limited, no PII) | `sdk.admin.customers` |
+| `write:own_tables` | The module's own `mod_<name>_*` tables | `sdk.tables` |
+| `http:outbound` | Mediated outbound HTTP | `sdk.http` |
+| `email:send` | Outbound email via core MailService | `sdk.email` |
+| `emit:events` | Emit `mod.<name>.<event>` to the bus | `sdk.events.emit` |
+| `subscribe:events` | Subscribe to core or module events | `sdk.events.on` |
+
+This is the **complete, closed** permission vocabulary. Any permission string not in this list is rejected at manifest verification — the runtime is default-deny.
+
+---
+
+## Module own tables
+
+Modules that need persistent state declare **namespaced tables** — never core tables. Every table a module owns must be named `mod_<module-name>_<suffix>`.
+
+### Declaring a table name
+
+Use `createNamespacedTable` from `@sovecom/module-sdk` to derive the table name for your migration
+DDL (modules write raw parameterized SQL — there is no Drizzle or `pg` handle):
+
+```ts
+import { createNamespacedTable } from '@sovecom/module-sdk';
+
+// Returns 'mod_wishlist_items'
+const TABLE = createNamespacedTable('wishlist', 'items');
+
+// Returns 'mod_wishlist_saves'
+const SAVES_TABLE = createNamespacedTable('wishlist', 'saves');
+```
+
+The function enforces the naming contract at call time and throws if either argument is invalid:
+
+- `moduleName` must match `/^[a-z][a-z0-9-]*$/` (the same slug used in `sovecom.module.json`).
+- `suffix` must match `/^[a-z0-9_]+$/` and must not start with `mod_`.
+- The returned string is `mod_<moduleName>_<suffix>`, e.g. `mod_wishlist_items`.
+
+Use these names in your manifest's `tables` array and migration SQL. The manifest validator enforces the same prefix rule, so the two cannot diverge.
+
+### Declaring tables in the manifest
+
+```json
+{
+  "name": "wishlist",
+  "displayName": "Wishlist",
+  "version": "1.0.0",
+  "compatibleCore": "^1.0.0",
+  "permissions": ["write:own_tables", "read:products"],
+  "tables": [
+    "mod_wishlist_items",
+    "mod_wishlist_saves"
+  ]
+}
+```
+
+Every entry in `tables` must start with `mod_<name>_` where `<name>` matches the manifest's own
+`name` field. The validator rejects any table that does not satisfy this constraint.
+
+### Querying own tables at runtime
+
+At runtime, modules query their own tables through `sdk.tables` — parameterized SQL mediated by the core broker. No direct Drizzle or `pg` handle is available:
+
+```ts
+// SELECT — resolves { rows, rowCount }
+const { rows } = await sdk.tables.query<{ product_id: string; added_at: string }>(
+  'SELECT product_id, added_at FROM mod_wishlist_items WHERE customer_id = $1 ORDER BY added_at DESC LIMIT $2',
+  [customerId, 50],
+);
+
+// INSERT — resolves { rows, rowCount }
+await sdk.tables.exec(
+  'INSERT INTO mod_wishlist_items (id, customer_id, product_id, added_at) VALUES ($1, $2, $3, NOW())',
+  [itemId, customerId, productId],
+);
+
+// DELETE
+await sdk.tables.exec(
+  'DELETE FROM mod_wishlist_items WHERE id = $1 AND customer_id = $2',
+  [itemId, customerId],
+);
+```
+
+**Rules enforced by the broker:**
+
+- The module may only reference tables declared in its own `tables` manifest array. Any query
+  touching a table outside that set is refused.
+- Parameterized values are bound — never interpolated into the SQL string. Do not build dynamic
+  SQL by concatenating untrusted input.
+- Tenant isolation for own tables is the module's responsibility in its SQL; the broker does not
+  add a tenant filter automatically (unlike the read-DTO ports).
+
+---
+
+## Outbound email
+
+Gated by `email:send`. The module never sees SMTP credentials or core transactional templates.
+
+### `sdk.email.send` — direct address
+
+```ts
+await sdk.email.send({
+  to: 'customer@example.com',   // single address; no CR/LF/comma/semicolon
+  subject: 'Your wishlist reminder',
+  text: 'You have items waiting in your wishlist.',
+  html: '<p>You have items waiting in your wishlist.</p>', // optional
+});
+```
+
+**`ModuleEmailMessage` fields:**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `to` | `string` | Single valid email address. Max 254 chars. No CR/LF, comma, or semicolon. |
+| `subject` | `string` | Subject line. Max 200 chars. No CR/LF. |
+| `text` | `string` | Plain-text body. Required. Max 50 000 chars. |
+| `html` | `string` | Optional HTML body. Max 100 000 chars. |
+
+### `sdk.email.sendToCustomer` — privacy-preserving
+
+Use this when you hold only an opaque `customerId`. The module supplies no address and never
+receives one. Core resolves the recipient, honours marketing consent and RGPD erasure, and
+either sends or silently suppresses:
+
+```ts
+const result = await sdk.email.sendToCustomer({
+  customerId: 'cus_abc123',
+  subject: 'Items in your wishlist',
+  text: 'You have items waiting.',
+  html: '<p>You have items waiting.</p>', // optional
+});
+
+// result.queued === true  → sent
+// result.queued === false → suppressed (no consent, erased, or not found — reason is opaque)
+```
+
+**`ModuleCustomerEmailMessage` fields:**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `customerId` | `string` | Opaque customer id. Core resolves the address; the module never sees it. |
+| `subject` | `string` | Subject line. Max 200 chars. No CR/LF. |
+| `text` | `string` | Plain-text body. Required. Max 50 000 chars. |
+| `html` | `string` | Optional HTML body. Max 100 000 chars. |
+
+**`ModuleEmailSendResult`:**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `queued` | `boolean` | `true` = message queued; `false` = suppressed (opaque reason). |
+
+---
+
+## What modules cannot read
+
+The following raw tables exist in `apps/api/src/database/schema/` but are **never exposed** to
+modules. They are listed here so it is clear what is intentionally out of scope:
+
+- `customers` — raw row including `email`, `phone`, `billing_address`, `accepts_marketing`,
+  `anonymized_at`
+- `orders` / `order_items` — raw financial and line-item data
+- `carts` / `cart_items`
+- `customer_addresses`
+- `customer_password_reset_tokens` / `email_change_tokens` / `password_reset_tokens`
+- `invoices` / `invoice_counters`
+- `disputes`
+- `discounts` / `discount_usages`
+- `audit_log`
+- `_tenants` / `installed_modules` / `installed_themes` / `module_migrations`
+- All Stripe, tax, and inventory internals
+
+Any request from a module that attempts to reach these tables directly is rejected by the broker.
+
+---
+
+## Further reading
+
+- [Building a Module](/guides/modules/) — manifest format, lifecycle, and slot system
+- [Module Security & Permissions](/guides/module-security/) — permission gates, default-deny model
+- [Custom Endpoints](/guides/custom-endpoints/) — registering HTTP routes from a module (`sdk.serve`)
+
+---
+
+Last updated: 2026-06-25

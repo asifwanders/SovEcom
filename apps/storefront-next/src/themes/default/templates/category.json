@@ -1,0 +1,13 @@
+{
+  "page": "category",
+  "sections": [
+    { "type": "category-header-row" },
+    {
+      "type": "columns",
+      "regions": {
+        "left": [{ "type": "category-filter-sidebar" }],
+        "right": [{ "type": "category-results" }]
+      }
+    }
+  ]
+}
