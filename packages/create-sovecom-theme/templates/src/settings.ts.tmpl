@@ -1,0 +1,16 @@
+/**
+ * __THEME_NAME__ — the typed default settings this theme exposes.
+ *
+ * `settingsSchema` in the manifest points at a JSON-schema file describing the tunable settings;
+ * that path stays OPAQUE — the core never reads or executes it at validation time.
+ * `defineThemeSettings` is purely COMPILE-TIME ergonomics: it types-and-returns your defaults so
+ * you get autocomplete and a single inferred shape to reuse. NO runtime behaviour, NO file read.
+ */
+import { defineThemeSettings } from '@sovecom/theme-sdk';
+
+export const settings = defineThemeSettings({
+  primaryColor: '#111111',
+  showBreadcrumbs: true,
+});
+
+export type ThemeSettingsShape = typeof settings;

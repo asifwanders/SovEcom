@@ -1,0 +1,50 @@
+# __THEME_NAME__
+
+A [SovEcom](https://github.com/) theme, scaffolded with `create-sovecom-theme`.
+
+## What's here
+
+```
+__THEME_NAME__/
+├── sovecom.theme.json      # the manifest: name, version, compatibleCore, slots, settingsSchema
+├── settings.schema.json    # JSON-schema describing your tunable settings (path is opaque to core)
+├── package.json            # depends on @sovecom/theme-sdk (dev); typechecks the authoring sources
+├── tsconfig.json           # typecheck-only (a theme is a declarative asset — no build output)
+├── src/
+│   ├── theme.ts            # the typed authoring view — `defineTheme({ ... })`
+│   ├── slots.ts            # the declarative slot slugs — `defineThemeSlots([...])`
+│   └── settings.ts         # typed default settings — `defineThemeSettings({ ... })`
+├── README.md
+├── .gitignore
+└── LICENSE                 # MIT
+```
+
+## The theme contract
+
+A theme is a **declarative ASSET**, not code. There is **no `activate`, no worker, no runtime
+entrypoint, no capabilities, no namespaced tables** — the core ingests your `sovecom.theme.json` and
+validates it; it never executes theme code. The entire store-facing
+runtime contract a theme touches is two already-shipped read-only endpoints:
+
+| Endpoint                | Shape                                          | Purpose                         |
+| ----------------------- | ---------------------------------------------- | ------------------------------- |
+| `GET /store/v1/theme`   | `{ name, version, settings }`                  | The active theme the storefront reads to render. |
+| `GET /store/v1/slots`   | `Record<slot, { module, component }>`          | The resolved slot map (conflicts omitted).       |
+
+`slots` are **declarative manifest metadata** — there is no runtime `registerSlot()`. The slot
+registry is derived from enabled **modules'** manifests.
+
+## Author
+
+```bash
+pnpm install
+pnpm typecheck   # tsc --noEmit over src/ — validates your defineTheme/defineThemeSlots config
+```
+
+`src/theme.ts` is the typed authoring view of `sovecom.theme.json`; keep the two in sync. The
+manifest (`sovecom.theme.json`) is the artifact the core ingests.
+
+## License
+
+MIT. See `LICENSE`. Themes are MIT-licensed — distinct from the AGPL core — so they can be authored
+and distributed commercially.

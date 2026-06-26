@@ -1,0 +1,41 @@
+{
+  "//": "Lighthouse-CI config for the BOUTIQUE theme. Identical collect/upload to",
+  "//2": "lighthouserc.json, but the performance bar is >= 0.85 (vs >= 0.90 for the default theme): the",
+  "//3": "editorial boutique theme ships a full-bleed hero + serif webfont + richer chrome, a deliberately",
+  "//4": "heavier visual identity, so it gets a slightly lower (still strong) performance floor. Run against",
+  "//5": "a storefront started with STOREFRONT_THEME=boutique. SOFT check (warn + continue-on-error) for the",
+  "//6": "same runner-variance reason as the default config. a11y/best-practices/seo stay at >= 0.90.",
+  "ci": {
+    "collect": {
+      "url": [
+        "http://localhost:3001/en",
+        "http://localhost:3001/en/category",
+        "http://localhost:3001/en/products"
+      ],
+      "numberOfRuns": 1,
+      "settings": {
+        "formFactor": "mobile",
+        "screenEmulation": {
+          "mobile": true,
+          "width": 393,
+          "height": 851,
+          "deviceScaleFactor": 2.75,
+          "disabled": false
+        },
+        "throttlingMethod": "simulate"
+      }
+    },
+    "assert": {
+      "assertions": {
+        "categories:performance": ["warn", { "minScore": 0.85 }],
+        "categories:accessibility": ["warn", { "minScore": 0.9 }],
+        "categories:best-practices": ["warn", { "minScore": 0.9 }],
+        "categories:seo": ["warn", { "minScore": 0.9 }]
+      }
+    },
+    "upload": {
+      "target": "filesystem",
+      "outputDir": "./.lighthouseci-boutique"
+    }
+  }
+}

@@ -1,0 +1,49 @@
+# __MODULE_NAME__
+
+A [SovEcom](https://github.com/) module, scaffolded with `create-sovecom-module`.
+
+## What's here
+
+```
+__MODULE_NAME__/
+├── sovecom.module.json   # the manifest: name, version, compatibleCore, permissions, slots, tables
+├── package.json          # depends on @sovecom/module-sdk; builds to a CJS dist/index.js
+├── tsconfig.json         # emits CommonJS (the worker loader requires a CJS entry)
+├── src/
+│   ├── index.ts          # the module body — `defineModule({ activate(sdk) { ... } })`
+│   └── db/
+│       └── schema.ts      # namespaced `mod___MODULE_NAME___*` table declarations
+├── README.md
+├── .gitignore
+└── LICENSE               # AGPL-3.0
+```
+
+## The module contract
+
+A module is a single `activate(sdk)` body run inside a sandboxed worker. `sdk` is the capability
+object — your only channel to core:
+
+| Capability   | Permission needed   | What it does                                              |
+| ------------ | ------------------- | -------------------------------------------------------- |
+| `sdk.store`  | `read:products`, …  | Read the storefront catalog (gated, field-limited).      |
+| `sdk.admin`  | `read:orders`, …    | Read admin data (gated, field-limited; no raw PII).      |
+| `sdk.tables` | `write:own_tables`  | Parameterized SQL against your OWN `mod_<name>_*` tables. |
+| `sdk.events` | `subscribe:events`, `emit:events` | Subscribe to / emit domain events.          |
+| `sdk.http`   | `http:outbound`     | Mediated, SSRF-guarded outbound HTTP.                    |
+| `sdk.serve`  | (none)              | Mount one HTTP handler under your module's routes.        |
+
+Declare the **minimum** permissions in `sovecom.module.json`. Core enforces them; the SDK cannot
+widen them. Slots are **declarative manifest metadata** — there is no runtime `registerSlot()`.
+
+## Develop
+
+```bash
+pnpm install
+pnpm build      # tsc → dist/index.js (CommonJS, exports activate)
+```
+
+The built `dist/index.js` is what the SovEcom runtime loads (`SOVECOM_MODULE_MAIN=<dir>/index.js`).
+
+## License
+
+AGPL-3.0. See `LICENSE`.

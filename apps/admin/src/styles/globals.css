@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ubuntu is self-hosted via @fontsource, imported in the app entrypoint
+   (main.tsx) so the bundler fingerprints and serves the font files from our
+   own origin — never the Google Fonts CDN (RGPD). */
+
+:root {
+  --background: #F4F2EF;
+  --foreground: #292524;
+  --card: #FCFBF9;
+  --card-foreground: #292524;
+  --popover: #FCFBF9;
+  --popover-foreground: #292524;
+  --muted: #EDEAE5;
+  --muted-foreground: #6B6660;
+  --border: #E2DED8;
+  --input: #D6D2CB;
+  --ring: #00B9A0;
+
+  --primary: #00B9A0;
+  --primary-hover: #00A38D;
+  --primary-active: #008D7A;
+  --primary-foreground: #04221D;
+
+  --secondary: #EDEAE5;
+  --secondary-foreground: #292524;
+  --accent: #EDEAE5;
+  --accent-foreground: #292524;
+
+  --success: #15803D;
+  --success-foreground: #FBFBFA;
+  --warning: #B45309;
+  --warning-foreground: #FBFBFA;
+  --destructive: #DC2626;
+  --destructive-foreground: #FBFBFA;
+  --info: #2563EB;
+  --info-foreground: #FBFBFA;
+
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: #1A1816;
+  --foreground: #E8E4DE;
+  --card: #232020;
+  --card-foreground: #E8E4DE;
+  --popover: #232020;
+  --popover-foreground: #E8E4DE;
+  --muted: #2A2624;
+  --muted-foreground: #A8A29E;
+  --border: #322E2B;
+  --input: #3D3936;
+  --ring: #2DD4BF;
+
+  --primary: #2DD4BF;
+  --primary-hover: #5EEAD4;
+  --primary-active: #99F6E4;
+  --primary-foreground: #04221D;
+
+  --secondary: #2A2624;
+  --secondary-foreground: #E8E4DE;
+  --accent: #2A2624;
+  --accent-foreground: #E8E4DE;
+
+  --success: #4ADE80;
+  --success-foreground: #141210;
+  --warning: #FBBF24;
+  --warning-foreground: #141210;
+  --destructive: #F87171;
+  --destructive-foreground: #141210;
+  --info: #60A5FA;
+  --info-foreground: #141210;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: 'Ubuntu', system-ui, sans-serif;
+}

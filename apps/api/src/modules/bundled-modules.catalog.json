@@ -1,0 +1,25 @@
+{
+  "comment": "SINGLE SOURCE OF TRUTH for the platform's BUILT-IN ('bundled') modules. Read by BOTH apps/api/src/modules/bundled-modules.ts (the runtime registry the setup install path validates against) AND scripts/pack-bundled-modules.mjs (the build step that packs each into apps/api/bundled-modules/<id>.tgz). Add an entry here and the module is offered at setup AND packed by `pnpm pack:bundled-modules` — no other edit needed. `id` MUST equal the module's manifest `name`. `dir` is relative to the repo root. `description` is the operator-facing one-liner (the manifest schema is .strict() and carries no description field, so it lives here). NOTE: named *.catalog.json (not bundled-modules.json) so its basename does not collide with bundled-modules.ts under Jest's extensionless module resolution.",
+  "modules": [
+    {
+      "id": "reviews",
+      "dir": "modules/reviews",
+      "description": "Let customers leave star ratings and written reviews on product pages."
+    },
+    {
+      "id": "recently-viewed",
+      "dir": "modules/recently-viewed",
+      "description": "Show shoppers a carousel of products they recently looked at."
+    },
+    {
+      "id": "wishlist",
+      "dir": "modules/wishlist",
+      "description": "Let customers save products to a wishlist and come back to them later."
+    },
+    {
+      "id": "notify-back-in-stock",
+      "dir": "modules/notify-back-in-stock",
+      "description": "Let customers ask to be emailed when a sold-out product is back in stock."
+    }
+  ]
+}

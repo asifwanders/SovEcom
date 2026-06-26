@@ -1,0 +1,10 @@
+{
+  "name": "wishlist",
+  "displayName": "Wishlist",
+  "version": "0.1.0",
+  "compatibleCore": "^1.0.0",
+  "permissions": ["read:products", "write:own_tables", "subscribe:events", "email:send"],
+  "slots": [{ "slot": "product-card-actions", "component": "toggle-button" }],
+  "settings": { "schema": "./settings.schema.json" },
+  "tables": ["mod_wishlist_items", "mod_wishlist_digest_log"]
+}

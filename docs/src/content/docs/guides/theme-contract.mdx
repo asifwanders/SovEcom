@@ -1,0 +1,628 @@
+---
+title: Theme Contract Reference
+description: Exhaustive reference for every slot, widget, template structure, store-data contract, manifest field, and settings type exposed by @sovecom/theme-sdk.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="tip">
+  New to themes? Start with the [Theme Authoring Guide](/guides/themes/) for a step-by-step tutorial. This page is the spec — the complete enumeration of every field, type, and constraint.
+</Aside>
+
+## Overview
+
+The `@sovecom/theme-sdk` package is the single source of truth for the SovEcom theme contract. The core runtime (`apps/api`) imports all validators and types **from this package**, so the published SDK can never drift from what the core enforces at install time.
+
+A theme is a **declarative asset**: there is no `activate`, no worker, no runtime entrypoint, and no database tables. The SDK exports validators, typing helpers, and the two store-contract types the storefront reads — nothing executable.
+
+Related reading: [Architecture Overview](/getting-started/architecture-overview/), [Module Guide](/guides/modules/).
+
+---
+
+## Public exports
+
+Everything below is re-exported from `@sovecom/theme-sdk`. Import any symbol directly:
+
+```ts
+import {
+  defineTheme,
+  defineThemeSlots,
+  defineThemeSettings,
+  parseAndVerifyThemeManifest,
+  parseTemplate,
+  defineTemplate,
+  defineSection,
+  parseWidget,
+  WIDGET_TYPES,
+  MANIFEST_MAX_BYTES,
+  CORE_API_VERSION,
+} from '@sovecom/theme-sdk';
+```
+
+| Export | Kind | Source |
+|--------|------|--------|
+| `THEME_SDK_VERSION` | `string` const | `index.ts` |
+| `defineTheme` | function | `theme.ts` |
+| `DefineThemeConfig` | type | `theme.ts` |
+| `defineThemeSlots` | function | `slots.ts` |
+| `defineThemeSettings` | function | `settings.ts` |
+| `ThemeSettings` | type | `settings.ts` |
+| `DocumentedThemeSettings` | interface | `settings.ts` |
+| `KnownThemeSettings` | type | `settings.ts` |
+| `THEME_NAME_RE` | `RegExp` const | `manifest.ts` |
+| `SLOT_SLUG_RE` | `RegExp` const | `manifest.ts` |
+| `TEMPLATE_PATH_RE` | `RegExp` const | `manifest.ts` |
+| `themeManifestSchema` | Zod schema | `manifest.ts` |
+| `themeTemplateDeclSchema` | Zod schema | `manifest.ts` |
+| `parseAndVerifyThemeManifest` | function | `manifest.ts` |
+| `ThemeManifest` | type | `manifest.ts` |
+| `ThemeTemplateDecl` | type | `manifest.ts` |
+| `PAGE_TYPES` | `readonly string[]` const | `template.ts` |
+| `SECTION_TYPE_RE` | `RegExp` const | `template.ts` |
+| `REGION_NAME_RE` | `RegExp` const | `template.ts` |
+| `MAX_REGION_DEPTH` | `number` const | `template.ts` |
+| `pageTypeSchema` | Zod schema | `template.ts` |
+| `regionNameSchema` | Zod schema | `template.ts` |
+| `templateSectionSchema` | Zod schema | `template.ts` |
+| `templateSchema` | Zod schema | `template.ts` |
+| `parseTemplate` | function | `template.ts` |
+| `defineTemplate` | function | `template.ts` |
+| `defineSection` | function | `template.ts` |
+| `PageType` | type | `template.ts` |
+| `TemplateSection` | type | `template.ts` |
+| `ThemeTemplate` | type | `template.ts` |
+| `SectionDef` | type | `template.ts` |
+| `WIDGET_TYPES` | `readonly string[]` const | `widget.ts` |
+| `WIDGET_MAX_BYTES` | `number` const | `widget.ts` |
+| `actionPathSchema` | Zod schema | `widget.ts` |
+| `actionSchema` | Zod schema | `widget.ts` |
+| `starRatingSummaryPropsSchema` | Zod schema | `widget.ts` |
+| `reviewListPropsSchema` | Zod schema | `widget.ts` |
+| `productCarouselPropsSchema` | Zod schema | `widget.ts` |
+| `toggleButtonPropsSchema` | Zod schema | `widget.ts` |
+| `submitFormPropsSchema` | Zod schema | `widget.ts` |
+| `widgetDescriptorSchema` | Zod schema | `widget.ts` |
+| `parseWidget` | function | `widget.ts` |
+| `WidgetType` | type | `widget.ts` |
+| `WidgetDescriptor` | type | `widget.ts` |
+| `StarRatingSummaryProps` | type | `widget.ts` |
+| `ReviewListProps` | type | `widget.ts` |
+| `ProductCarouselProps` | type | `widget.ts` |
+| `ToggleButtonProps` | type | `widget.ts` |
+| `SubmitFormProps` | type | `widget.ts` |
+| `MANIFEST_MAX_BYTES` | `number` const | re-exported from `@sovecom/module-sdk` |
+| `assertCoreCompatible` | function | re-exported from `@sovecom/module-sdk` |
+| `CORE_API_VERSION` | `string` const | re-exported from `@sovecom/module-sdk` |
+| `ActiveTheme` | type | `store-contract.ts` |
+| `SlotBinding` | type | `store-contract.ts` |
+| `SlotMap` | type | `store-contract.ts` |
+
+---
+
+## Manifest schema (`sovecom.theme.json`)
+
+The manifest is validated by `parseAndVerifyThemeManifest(raw: string): ThemeManifest`. It enforces a **64 KiB byte cap** (shared with `@sovecom/module-sdk` via `MANIFEST_MAX_BYTES = 64 * 1024`), rejects unknown top-level keys (`.strict()`), and runs a semver major gate against `CORE_API_VERSION`.
+
+### Manifest fields
+
+| Field | Type | Required | Constraint |
+|-------|------|----------|------------|
+| `name` | `string` | Yes | Lowercase slug `^[a-z][a-z0-9-]*$`; max 64 chars |
+| `displayName` | `string` | Yes | Non-empty; max 128 chars |
+| `version` | `string` | Yes | Valid semver; max 64 chars |
+| `compatibleCore` | `string` | Yes | Valid semver range; max 256 chars |
+| `slots` | `string[]` | No | Array of lowercase slugs; max 64 entries; no duplicates |
+| `settingsSchema` | `string` | No | Relative path to a JSON-schema file; max 256 chars |
+| `templates` | `ThemeTemplateDecl[]` | No | At most one entry per page type; max entries = number of page types |
+
+Unknown top-level keys are **rejected** (`.strict()`).
+
+### TypeScript type (verbatim from `manifest.ts`)
+
+```ts
+export type ThemeManifest = z.infer<typeof themeManifestSchema>;
+```
+
+Resolved shape:
+
+```ts
+{
+  name: string;
+  displayName: string;
+  version: string;
+  compatibleCore: string;
+  slots?: string[];
+  settingsSchema?: string;
+  templates?: ThemeTemplateDecl[];
+}
+```
+
+### Template declaration fields
+
+Each entry in `templates[]` is a `ThemeTemplateDecl`:
+
+| Field | Type | Required | Constraint |
+|-------|------|----------|------------|
+| `page` | `PageType` | Yes | One of `PAGE_TYPES` (see [Page Types](#page-types)) |
+| `path` | `string` | Yes | Relative `.json` slug path; no `..`; no leading `/`; max 256 chars |
+
+The `path` regex is `TEMPLATE_PATH_RE = /^[a-z0-9][a-z0-9_-]*(\/[a-z0-9][a-z0-9_-]*)*\.json$/`. The ingest re-asserts containment against the extraction root as defence in depth; this regex is the first gate.
+
+### Author helper: `defineTheme`
+
+```ts
+export type DefineThemeConfig = Omit<ThemeManifest, 'slots'> & {
+  readonly slots?: readonly string[];
+};
+
+export function defineTheme(config: DefineThemeConfig): ThemeManifest
+```
+
+Runs the same `parseAndVerifyThemeManifest` pipeline the core runs at install time. Throws a clear `Error` on any violation. Use this at build time to validate your manifest config object before serialising it to `sovecom.theme.json`.
+
+### Minimal example
+
+```json
+{
+  "name": "aurora",
+  "displayName": "Aurora",
+  "version": "1.0.0",
+  "compatibleCore": "^1.0.0"
+}
+```
+
+---
+
+## Slot contract
+
+Slots are **declarative metadata** in the manifest's `slots` array. The slot registry is derived at runtime from enabled modules' manifests. There is no runtime `registerSlot()`.
+
+### Slot slug rules
+
+Each slot must match `SLOT_SLUG_RE = /^[a-z][a-z0-9-]*$/`. No duplicate slugs. Max 64 slots per theme. Max 128 chars per slug.
+
+### Author helper: `defineThemeSlots`
+
+```ts
+export function defineThemeSlots(slots: ReadonlyArray<string>): readonly string[]
+```
+
+Validates and returns a frozen array of slot slugs. Throws on the first invalid or duplicate slug. Its output is dropped verbatim into the manifest's `slots` field.
+
+```ts
+import { defineThemeSlots } from '@sovecom/theme-sdk';
+
+const slots = defineThemeSlots([
+  'product-reviews',
+  'related-products',
+  'wishlist-toggle',
+]);
+```
+
+---
+
+## Template structure
+
+A **page template** is a declarative JSON document consumed by the storefront runtime. The runtime resolves each section `type` against its section registry and renders sections in order. Templates are pure data — no code execution.
+
+### Page types
+
+```ts
+export const PAGE_TYPES = ['home', 'product', 'category', 'products', 'search', 'cart'] as const;
+export type PageType = (typeof PAGE_TYPES)[number];
+```
+
+| Value | Meaning |
+|-------|---------|
+| `home` | Storefront homepage |
+| `product` | Single product detail page |
+| `category` | Category landing page |
+| `products` | All-products / collection listing |
+| `search` | Search results page |
+| `cart` | Cart page |
+
+### `ThemeTemplate` type (verbatim from `template.ts`)
+
+```ts
+export type ThemeTemplate = z.infer<typeof templateSchema>;
+// Resolved:
+// { page: PageType; sections: TemplateSection[]; }
+```
+
+Top-level `sections` array: max **64** entries.
+
+### `TemplateSection` type (verbatim from `template.ts`)
+
+```ts
+export interface TemplateSection {
+  type: string;
+  settings?: Record<string, unknown>;
+  regions?: Record<string, TemplateSection[]>;
+}
+```
+
+| Field | Type | Required | Constraint |
+|-------|------|----------|------------|
+| `type` | `string` | Yes | Lowercase slug `^[a-z][a-z0-9-]*$`; max 128 chars |
+| `settings` | `Record<string, unknown>` | No | Opaque bag; validated against the section's own schema at render time |
+| `regions` | `Record<string, TemplateSection[]>` | No | Layout nesting (see below) |
+
+Unknown keys are **rejected** (`.strict()`).
+
+### Region nesting (layout sections)
+
+A section may declare named `regions` — each region is an ordered list of nested `TemplateSection`s, enabling sidebar/results column splits and similar layouts.
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `MAX_REGION_DEPTH` | `2` | Maximum nesting depth of `regions` |
+| `MAX_REGIONS` (internal) | `8` | Max named regions per section |
+
+Region names must match `REGION_NAME_RE = /^[a-z][a-z0-9-]*$/`.
+
+- **Depth 0**: a top-level section in `sections[]`.
+- **Depth 1**: a section inside a named region of a depth-0 section.
+- **Depth 2**: a section inside a named region of a depth-1 section. **This is the maximum.**
+
+`parseTemplate` enforces the depth cap with a post-parse walk after the Zod schema validates shape and structural bounds.
+
+### Parse function
+
+```ts
+export function parseTemplate(raw: string): ThemeTemplate
+```
+
+- Enforces the `MANIFEST_MAX_BYTES` (64 KiB) cap on the raw string.
+- Parses JSON; maps a parse failure to a clear `Error`.
+- Runs the Zod schema; aggregates issues into a descriptive message.
+- Walks the validated result asserting `MAX_REGION_DEPTH`.
+- Returns the typed `ThemeTemplate` or **throws**.
+
+### Author helpers
+
+```ts
+export function defineTemplate(config: ThemeTemplate): ThemeTemplate
+```
+
+Runs the same `parseTemplate` pipeline (round-trips through JSON). Use at build time to validate a template before writing it to disk.
+
+```ts
+export interface SectionDef<T> {
+  readonly type: string;
+  readonly settings?: T;
+}
+
+export function defineSection<T>(def: SectionDef<T>): SectionDef<T>
+```
+
+`defineSection` is a pure typing vehicle — a no-op at runtime that pins the settings type `T` for editor autocomplete. It does not validate.
+
+### Example template
+
+```json
+{
+  "page": "home",
+  "sections": [
+    { "type": "hero-banner", "settings": { "heading": "Welcome" } },
+    {
+      "type": "two-column",
+      "regions": {
+        "left":  [{ "type": "filter-panel" }],
+        "right": [{ "type": "product-grid" }]
+      }
+    },
+    { "type": "featured-products" }
+  ]
+}
+```
+
+---
+
+## Widget vocabulary (module slot-widget contract)
+
+Modules contribute storefront UI by returning a typed **widget descriptor** `{ type, props }`. The storefront renders its own known MIT components from that data. **No code, no HTML, no SVG crosses the boundary — only data.**
+
+The widget vocabulary is **closed**: a module author cannot register a new type. Adding a widget type is an MIT storefront contribution reviewed like adding a section.
+
+### Widget types
+
+```ts
+export const WIDGET_TYPES = [
+  'star-rating-summary',
+  'review-list',
+  'product-carousel',
+  'toggle-button',
+  'submit-form',
+] as const;
+
+export type WidgetType = (typeof WIDGET_TYPES)[number];
+```
+
+### Byte cap
+
+```ts
+export const WIDGET_MAX_BYTES = MANIFEST_MAX_BYTES; // 64 * 1024
+```
+
+### `WidgetDescriptor` type
+
+```ts
+export type WidgetDescriptor = z.infer<typeof widgetDescriptorSchema>;
+// A discriminated union: { type: WidgetType; props: <per-widget props> }
+```
+
+Each member is `.strict()` — unknown keys at the descriptor level or within props are rejected.
+
+### Per-widget props
+
+#### `star-rating-summary`
+
+```ts
+export type StarRatingSummaryProps = z.infer<typeof starRatingSummaryPropsSchema>;
+// { average: number; count: number }
+```
+
+| Prop | Type | Constraint |
+|------|------|------------|
+| `average` | `number` | `[0, 5]` |
+| `count` | `number` (integer) | `≥ 0` |
+
+#### `review-list`
+
+```ts
+export type ReviewListProps = z.infer<typeof reviewListPropsSchema>;
+// { items: ReviewItem[] }
+```
+
+`items` array: max **50** entries.
+
+Each item:
+
+| Prop | Type | Constraint |
+|------|------|------------|
+| `id` | `string` | Min 1, max 64 chars |
+| `rating` | `number` (integer) | `[1, 5]` |
+| `body` | `string` | Max 2000 chars |
+| `author` | `string` (optional) | Max 120 chars |
+| `createdAt` | `string` | ISO-8601 datetime (e.g. `2026-06-25T10:00:00.000Z`) |
+
+#### `product-carousel`
+
+```ts
+export type ProductCarouselProps = z.infer<typeof productCarouselPropsSchema>;
+// { heading?: string; items: CarouselItem[] }
+```
+
+`items` array: max **24** entries.
+
+| Prop | Type | Constraint |
+|------|------|------------|
+| `heading` | `string` (optional) | Max 120 chars |
+
+Each item:
+
+| Prop | Type | Constraint |
+|------|------|------------|
+| `productId` | `string` | Min 1, max 64 chars |
+| `slug` | `string` | Min 1, max 200 chars; no `/`, `\`, or `..` |
+| `title` | `string` | Min 1, max 200 chars |
+| `imageUrl` | `string` (optional) | Max 2048 chars |
+
+The `slug` traversal guard prevents a module from returning `slug: '../../admin'` and turning a carousel link into a within-origin redirect. C2 (the storefront render layer) also `encodeURIComponent`s the slug at render as defence in depth.
+
+#### `toggle-button`
+
+```ts
+export type ToggleButtonProps = z.infer<typeof toggleButtonPropsSchema>;
+```
+
+| Prop | Type | Constraint |
+|------|------|------------|
+| `initialOn` | `boolean` | — |
+| `onAction` | `{ path: string }` | Relative `/store/v1/modules/…` path |
+| `offAction` | `{ path: string }` | Relative `/store/v1/modules/…` path |
+| `labels.on` | `string` | Min 1, max 60 chars |
+| `labels.off` | `string` | Min 1, max 60 chars |
+| `icon` | `'heart' \| 'bell' \| 'star'` | Enum only |
+
+#### `submit-form`
+
+```ts
+export type SubmitFormProps = z.infer<typeof submitFormPropsSchema>;
+```
+
+| Prop | Type | Constraint |
+|------|------|------------|
+| `action` | `{ path: string }` | Relative `/store/v1/modules/…` path |
+| `submitLabel` | `string` | Min 1, max 60 chars |
+| `successMessage` | `string` (optional) | Max 200 chars |
+| `fields` | `FormField[]` | Max 8 entries |
+
+Each `FormField`:
+
+| Prop | Type | Constraint |
+|------|------|------------|
+| `name` | `string` | Min 1, max 40 chars |
+| `label` | `string` | Min 1, max 120 chars |
+| `kind` | `'text' \| 'textarea' \| 'rating' \| 'email' \| 'select'` | Enum only |
+| `required` | `boolean` | — |
+| `options` | `string[]` (optional) | Max 20 entries; each max 120 chars — required when `kind` is `'select'` |
+
+### Action path schema
+
+Interactive widgets (`toggle-button`, `submit-form`) reference module endpoints via a relative action path. The `actionPathSchema` validates shape only (C1); the storefront (C2) binds it to the originating module's mount.
+
+Rules enforced:
+
+- Must start with `/store/v1/modules/`.
+- Max 512 chars.
+- Allowlist regex: only URL-safe path characters after the prefix (`A–Z a–z 0–9 - _ . ~ / : @ ! $ & ' ( ) * + , ; =`).
+- `%` is **excluded** — no encoding channel for `..` or CRLF.
+- Must not contain a `..` path segment (explicit `.refine` as defence in depth).
+- No CR/LF or ASCII control characters (not in the allowlist class).
+
+```ts
+export const actionPathSchema = z
+  .string()
+  .min(ACTION_PATH_PREFIX.length)
+  .max(512)
+  .regex(SAFE_PATH_BODY_RE, 'action path must be a clean relative /store/v1/modules/... path')
+  .refine((p) => !p.split('/').includes('..'), {
+    message: 'action path must not contain `..` traversal',
+  });
+```
+
+### Parse function
+
+```ts
+export function parseWidget(raw: unknown): WidgetDescriptor | null
+```
+
+- Accepts a JSON string (byte-capped, then `JSON.parse`d) or an already-parsed value.
+- Returns the typed `WidgetDescriptor` on success.
+- Returns **`null` on any failure** — oversized, non-JSON, unknown type, discriminator mismatch, out-of-bounds prop, bad enum, bad path, unknown key. **Never throws.**
+- This is the fail-closed contract the storefront RSC relies on: "render nothing, never 500 the page".
+
+---
+
+## Settings schema
+
+### Core types (verbatim from `settings.ts`)
+
+```ts
+export type ThemeSettings = Record<string, unknown>;
+
+export type KnownThemeSettings = DocumentedThemeSettings & ThemeSettings;
+```
+
+`ThemeSettings` is the shape that `GET /store/v1/theme` returns in `ActiveTheme.settings` — an open-ended record. The core treats settings as **opaque**: it never reads or executes the referenced `settingsSchema` JSON-schema file. Validation against the file is the theme's own build-time concern.
+
+### Documented knobs (`DocumentedThemeSettings`)
+
+These are the design-token settings keys the MIT storefront recognises and maps to CSS custom properties (3.9d). Documenting them gives editors autocomplete without closing the contract — `KnownThemeSettings` intersects with the open `ThemeSettings` so arbitrary author keys still type-check.
+
+**Typography values are CSS `font-family` stacks (system stacks only — no webfont files or Google Fonts, per the RGPD self-host rule).**
+
+| Key | CSS variable / effect | Type |
+|-----|-----------------------|------|
+| `background` | `--background` | `string` (CSS color) |
+| `foreground` | `--foreground` | `string` (CSS color) |
+| `primary` | `--primary` | `string` (CSS color) |
+| `primaryHover` | `--primary-hover` | `string` (CSS color) |
+| `primaryActive` | `--primary-active` | `string` (CSS color) |
+| `primaryForeground` | `--primary-foreground` | `string` (CSS color) |
+| `accent` | `--accent` | `string` (CSS color) |
+| `accentForeground` | `--accent-foreground` | `string` (CSS color) |
+| `ring` | `--ring` | `string` (CSS color) |
+| `radius` | `--radius` | `string` (CSS length) |
+| `fontSans` | `--font-sans` | `string` (font-family stack) |
+| `fontHeading` | `--font-heading` | `string` (font-family stack) |
+| `logoUrl` | Layout logo `<img>` src | `string` (absolute `https://` or root-relative) |
+| `header.layout` | Chrome variant (not a CSS var) | `'simple' \| 'mega'` |
+| `cart.affordance` | Chrome variant (not a CSS var) | `'drawer' \| 'page-link'` |
+
+`header.layout` defaults to `simple`; `cart.affordance` defaults to `drawer`. Unknown values fall back to the default so the default theme is unaffected.
+
+### Author helper
+
+```ts
+export function defineThemeSettings<T extends ThemeSettings>(defaults: T): T
+```
+
+A pure no-op at runtime (returns its argument unchanged). Gives editor autocomplete and a single inferred `T` to reuse. Does **not** read or validate against the `settingsSchema` file.
+
+```ts
+import { defineThemeSettings, type KnownThemeSettings } from '@sovecom/theme-sdk';
+
+export const defaults = defineThemeSettings<KnownThemeSettings>({
+  background: '#ffffff',
+  foreground: '#111827',
+  primary: '#4f46e5',
+  fontSans: 'Inter, system-ui, sans-serif',
+  'header.layout': 'simple',
+});
+```
+
+---
+
+## Store-data contract
+
+The storefront reads **two** endpoints from `GET /store/v1/*`. The types below are the compile-time contract: a CI type-conformance guard asserts the in-tree view types stay assignable to these.
+
+### `ActiveTheme` (verbatim from `store-contract.ts`)
+
+Returned by `GET /store/v1/theme`.
+
+```ts
+export interface ActiveTheme {
+  readonly name: string;
+  readonly version: string;
+  readonly settings: ThemeSettings;
+}
+```
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `name` | `string` | The active theme's slug name |
+| `version` | `string` | Semver version string |
+| `settings` | `ThemeSettings` | Opaque settings record (the author's JSON-schema file describes its shape) |
+
+### `SlotBinding` (verbatim from `store-contract.ts`)
+
+One cleanly-resolved slot binding inside `SlotMap`.
+
+```ts
+export interface SlotBinding {
+  readonly module: string;
+  readonly component: string;
+}
+```
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `module` | `string` | The module that fills this slot |
+| `component` | `string` | The widget `type` the storefront maps to that module's UI |
+
+### `SlotMap` (verbatim from `store-contract.ts`)
+
+Returned by `GET /store/v1/slots`.
+
+```ts
+export type SlotMap = Record<string, SlotBinding>;
+```
+
+Keys are slot slugs. **Only cleanly-resolved slots are present** — conflicts and unresolved slots are omitted, never silently picked. A slot absent from the map means no module fills it; the theme should render nothing or a placeholder.
+
+---
+
+## Shared core-API primitives
+
+These are re-exported from `@sovecom/module-sdk` so both SDKs gate against a single source of truth.
+
+| Export | Value / Signature | Meaning |
+|--------|-------------------|---------|
+| `MANIFEST_MAX_BYTES` | `64 * 1024` (65 536) | Byte cap for manifests, templates, and widget descriptors |
+| `CORE_API_VERSION` | `string` (semver) | Current core API version; used by `assertCoreCompatible` |
+| `assertCoreCompatible` | `(manifest: { compatibleCore: string }) => void` | Throws if the theme's range does not include the current core's major |
+
+---
+
+## Constants quick-reference
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `THEME_SDK_VERSION` | `'0.0.1'` | SDK package version |
+| `MANIFEST_MAX_BYTES` | `65536` | Byte cap (64 KiB) shared across manifests, templates, widgets |
+| `WIDGET_MAX_BYTES` | `65536` | Alias of `MANIFEST_MAX_BYTES` |
+| `MAX_REGION_DEPTH` | `2` | Max `regions` nesting depth in templates |
+| `THEME_NAME_RE` | `/^[a-z][a-z0-9-]*$/` | Theme name slug pattern |
+| `SLOT_SLUG_RE` | `/^[a-z][a-z0-9-]*$/` | Slot slug pattern |
+| `SECTION_TYPE_RE` | `/^[a-z][a-z0-9-]*$/` | Section type slug pattern |
+| `REGION_NAME_RE` | `/^[a-z][a-z0-9-]*$/` | Region name slug pattern |
+| `TEMPLATE_PATH_RE` | `/^[a-z0-9][a-z0-9_-]*(\/[a-z0-9][a-z0-9_-]*)*\.json$/` | Template file path pattern |
+| `PAGE_TYPES` | `['home','product','category','products','search','cart']` | All valid page type values |
+| `WIDGET_TYPES` | `['star-rating-summary','review-list','product-carousel','toggle-button','submit-form']` | Closed widget vocabulary |
+
+---
+
+Last updated: 2026-06-25

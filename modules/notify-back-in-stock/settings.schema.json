@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Notify-back-in-stock module settings",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Master on/off. When false the module's endpoints return 404."
+    },
+    "batchSize": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5000,
+      "default": 500,
+      "description": "Max back-in-stock emails sent per runBackInStockNotifications run (per-run cap)."
+    },
+    "subjectTemplate": {
+      "type": "string",
+      "maxLength": 160,
+      "default": "Back in stock: {product}",
+      "description": "Optional subject template. The literal token {product} is replaced with the product title. Bounded length; no control characters."
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@sovecom/docs",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "openapi:split": "node scripts/split-openapi.mjs",
+    "dev": "node scripts/split-openapi.mjs && astro dev --port 4321",
+    "build": "node scripts/split-openapi.mjs && astro build",
+    "preview": "astro preview",
+    "typecheck": "astro check",
+    "lint": "echo 'no linting configured yet' && exit 0",
+    "test": "echo 'no tests yet' && exit 0",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.39.3",
+    "astro": "^6.4.6",
+    "sharp": "^0.34.5",
+    "starlight-openapi": "^0.25.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "typescript": "^6.0.3"
+  }
+}

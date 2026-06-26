@@ -1,0 +1,50 @@
+name: ✨ Feature Request
+description: Suggest an idea or enhancement for SovEcom.
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement.
+
+        For **non-trivial** changes (new core features, API/breaking changes, security-model changes) an **RFC** is required first — see the RFC process in [GOVERNANCE.md](../../GOVERNANCE.md).
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I searched existing issues/discussions and did not find a duplicate.
+          required: true
+        - label: I understand SovEcom is EU-first and scope-disciplined; this fits that direction.
+          required: false
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What problem does this solve? Who feels the pain?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe what you'd like to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: dropdown
+    id: rfc
+    attributes:
+      label: Does this likely require an RFC?
+      options:
+        - "Not sure"
+        - "No — small/contained change"
+        - "Yes — new core feature / API / security-model change"
+    validations:
+      required: true

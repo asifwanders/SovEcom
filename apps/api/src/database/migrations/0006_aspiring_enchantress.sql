@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "carts_one_active_per_customer" ON "carts" USING btree ("tenant_id","customer_id") WHERE status = 'active' AND customer_id IS NOT NULL;

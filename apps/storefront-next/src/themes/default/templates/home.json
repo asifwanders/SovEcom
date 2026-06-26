@@ -1,0 +1,8 @@
+{
+  "page": "home",
+  "sections": [
+    { "type": "hero" },
+    { "type": "featured-products", "settings": { "limit": 8 } },
+    { "type": "category-list" }
+  ]
+}

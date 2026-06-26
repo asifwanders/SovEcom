@@ -1,0 +1,270 @@
+---
+title: Module Publishing Guide
+description: How to package, version, and publish a SovEcom module to npm, including manifest requirements and core SDK compatibility.
+---
+
+Covers packaging, versioning, and publishing a SovEcom module to npm.
+
+For authoring and testing a module before publishing, see [/guides/modules/](/guides/modules/).
+For the security rules governing what a module may declare, see [/guides/module-security/](/guides/module-security/).
+
+---
+
+## Core SDK version compatibility
+
+SovEcom's module loader enforces a semver gate between every module and the running core. The gate is defined in `packages/module-sdk/src/core-version.ts`:
+
+```ts
+export const CORE_API_VERSION = '1.0.0';
+```
+
+This constant is the stable contract between core and modules. It is intentionally decoupled from the API package's own `package.json` version (which is still pre-1.0 and changes frequently). When the **major** of `CORE_API_VERSION` is bumped, all modules whose `compatibleCore` range does not satisfy the new major are refused at load time — no fallback, no silent degradation.
+
+### How the gate works
+
+Your manifest's `compatibleCore` field is a standard semver range. At load time the core calls `assertCoreCompatible(manifest)`, which checks two things:
+
+1. `semver.satisfies(CORE_API_VERSION, range)` — the range must accept the running core version.
+2. The lower bound of your range must share the **same major** as `CORE_API_VERSION`.
+
+This means:
+
+| `compatibleCore` value | Accepted on core `1.0.0`? | Notes |
+|---|---|---|
+| `^1.0.0` | yes | recommended — accepts all 1.x patch/minor releases |
+| `>=1.0.0` | yes | wider; also accepts future 2.x when core reaches it |
+| `1.x` | yes | equivalent to `^1.0.0` |
+| `^0.9.0` | **no** | wrong major |
+| `^2.0.0` | **no** | future major, core not there yet |
+
+Use `"^1.0.0"` unless you have a specific reason to be narrower or wider.
+
+---
+
+## The manifest (`sovecom.module.json`)
+
+The manifest is validated by `parseAndVerifyManifest` (from `@sovecom/module-sdk`) before the module is loaded. The validator uses `.strict()` — unknown top-level keys are **rejected**. The file must be under 64 KiB.
+
+### All fields
+
+```json
+{
+  "name": "wishlist",
+  "displayName": "Wishlist",
+  "version": "0.2.1",
+  "compatibleCore": "^1.0.0",
+  "permissions": [
+    "read:products",
+    "write:own_tables",
+    "subscribe:events"
+  ],
+  "slots": [
+    { "slot": "product-detail-cta", "component": "wishlist-button" }
+  ],
+  "tables": ["mod_wishlist_items"],
+  "settings": { "schema": "./settings.schema.json" }
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `name` | string | yes | Lowercase slug matching `^[a-z][a-z0-9-]*$`. Max 64 chars. Forms the `mod_<name>_*` table prefix and the URL segment. |
+| `displayName` | string | yes | Human-readable label. Max 128 chars. |
+| `version` | string | yes | Must be valid semver. Max 64 chars. |
+| `compatibleCore` | string | yes | A valid semver range. Must satisfy `CORE_API_VERSION` (currently `1.0.0`) on the same major. |
+| `permissions` | array | yes | Subset of the closed allowlist (see below). Empty array is valid — declare only what you use. |
+| `slots` | array | no | Declarative slot targets: `{ slot, component }` pairs. Each slot may appear at most once per module. |
+| `tables` | array | no | Every entry must be prefixed `mod_<name>_` with a lowercase `[a-z0-9_]` suffix. Core enforces this; mismatches are rejected at load. |
+| `settings` | object | no | `{ "schema": "<path>" }` — path to a JSON Schema file describing the module's admin-configurable settings. |
+
+### The permission allowlist
+
+Only the following permissions may appear in `permissions`. Anything outside this list is rejected at manifest parse time (default-deny).
+
+```ts
+'read:products'
+'read:categories'
+'read:orders'
+'read:customers'
+'write:own_tables'
+'emit:events'
+'subscribe:events'
+'http:outbound'
+'email:send'
+```
+
+Declare the minimum. If your module does not send outbound HTTP, do not include `http:outbound`.
+
+### Real-world example — `modules/reviews`
+
+```json
+{
+  "name": "reviews",
+  "displayName": "Product reviews",
+  "version": "0.1.0",
+  "compatibleCore": "^1.0.0",
+  "permissions": ["write:own_tables", "read:products", "read:orders"],
+  "slots": [{ "slot": "product-detail-reviews-section", "component": "review-list" }],
+  "settings": { "schema": "./settings.schema.json" },
+  "tables": ["mod_reviews_reviews"]
+}
+```
+
+---
+
+## `package.json` for a published module
+
+The scaffolder (`create-sovecom-module`) generates a `package.json` that is private by default. Before publishing you must update several fields.
+
+### Template baseline (from `packages/create-sovecom-module/templates/package.json.tmpl`)
+
+This is the exact `package.json` the scaffolder emits (`__MODULE_NAME__` substituted):
+
+```json
+{
+  "name": "__MODULE_NAME__",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A SovEcom module.",
+  "license": "AGPL-3.0-only",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@sovecom/module-sdk": "^0.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.4.0"
+  }
+}
+```
+
+Before publishing, change and add:
+
+- **Remove `"private": true`.**
+- **`name`** — use `sovecom-module-<slug>` by convention for npm discoverability. The slug should match the `name` field in `sovecom.module.json`.
+- **`version`** must match `sovecom.module.json#version`. Bump both together.
+- **`license`** — the scaffold ships `AGPL-3.0-only` to match the SovEcom core and SDK you link against. Any license you choose must be compatible with the AGPL-3.0 SDK; check the project [governance docs](https://github.com/asifwanders/SovEcom) before relicensing.
+- **`files`** — add an allowlist so npm ships only what runs: `["dist", "sovecom.module.json", "settings.schema.json"]` (drop the schema entry if your module has no settings).
+- **`peerDependencies`** — optionally move `@sovecom/module-sdk` to `peerDependencies` so the consuming core installation owns the version. The `^0.0.1` range narrows to `^1.x` once the SDK reaches 1.0.
+- **`keywords`** — add `["sovecom", "sovecom-module"]` for discoverability.
+
+---
+
+## Build and pre-publish checklist
+
+```bash
+# 1. Install dependencies
+pnpm install
+
+# 2. Type-check
+pnpm typecheck
+
+# 3. Run tests
+pnpm test
+
+# 4. Build the distributable
+pnpm build
+
+# 5. Validate the manifest against the SDK schema
+node -e "
+  const { parseAndVerifyManifest } = require('@sovecom/module-sdk');
+  const fs = require('fs');
+  parseAndVerifyManifest(fs.readFileSync('./sovecom.module.json', 'utf8'));
+  console.log('manifest OK');
+"
+
+# 6. Inspect what will be published
+npm pack --dry-run
+```
+
+Confirm that `dist/` exists and `sovecom.module.json` appears in the pack output before publishing.
+
+---
+
+## Publishing to npm
+
+```bash
+# Authenticate (once per machine / CI runner)
+npm login
+
+# Publish a public package
+npm publish --access public
+```
+
+For scoped packages (e.g. `@yourorg/sovecom-module-wishlist`) the `--access public` flag is required the first time; subsequent publishes inherit it.
+
+### Versioning discipline
+
+Follow semver against your own module's API surface **and** track core compatibility changes:
+
+| Change | Bump |
+|---|---|
+| New feature, backward compatible | minor |
+| Bug fix | patch |
+| Breaking change to module's own API or settings schema | major |
+| Required `compatibleCore` range change (e.g. dropping support for an older core major) | major |
+
+When a new core major ships (e.g. `CORE_API_VERSION` advances to `2.0.0`), update `compatibleCore` to `"^2.0.0"` and publish a new major of your module. Operators running the old core continue to use the previous major. See [/guides/migration/](/guides/migration/) for core upgrade procedures.
+
+### CI publishing
+
+In GitHub Actions, store your npm token as `NPM_TOKEN` and publish on tag push:
+
+```bash
+# .github/workflows/publish.yml (excerpt)
+- name: Publish to npm
+  run: npm publish --access public
+  env:
+    NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+---
+
+## Marketplace submission
+
+:::note
+The SovEcom module marketplace is not yet live. The process below describes the intended future submission flow; it is not available today.
+
+The npm path documented above is the only publishing channel that works right now. Publish to npm and share your package name with users.
+:::
+
+When the marketplace launches, the intended submission flow will be:
+
+1. Publish your module to npm following the steps above.
+2. Submit the npm package name and version via the marketplace submission form (URL TBD).
+3. The automated review pipeline will run `parseAndVerifyManifest` on your `sovecom.module.json`, confirm the `compatibleCore` gate, and scan for supply-chain issues.
+4. A human review will check permissions against the stated module purpose before approval.
+
+Listing metadata (screenshots, description, category) will be managed via the marketplace dashboard. Security-sensitive permissions (`http:outbound`, `email:send`) will require an additional justification step.
+
+---
+
+## Troubleshooting common manifest errors
+
+**`invalid module manifest: compatibleCore: compatibleCore must be a valid semver range`**
+
+The value is not a valid semver range string. Check for typos: `"^1.0.0"` is valid; `"1.0"` is not.
+
+**`module is not compatible with this core: requires "^0.9.0" but core API is 1.0.0 (major 1)`**
+
+Your `compatibleCore` lower bound is on a different major than the running core. Update the range.
+
+**`table "reviews" must be namespaced "mod_reviews_<name>"`**
+
+Every `tables` entry must be prefixed `mod_<module-name>_`. Change `"reviews"` to `"mod_reviews_reviews"`.
+
+**`slot "product-page" is declared more than once`**
+
+A module may target each slot at most once. Remove the duplicate `slots` entry.
+
+**`module manifest too large: N bytes exceeds the 65536-byte cap`**
+
+The manifest is over 64 KiB. This almost certainly means you embedded binary data or a large schema inline. Move large schemas to a separate file referenced via `settings.schema`.
+
+---
+
+Last updated: 2026-06-25

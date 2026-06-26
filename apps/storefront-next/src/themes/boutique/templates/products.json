@@ -1,0 +1,8 @@
+{
+  "page": "products",
+  "sections": [
+    { "type": "products-header" },
+    { "type": "product-grid" },
+    { "type": "products-load-more" }
+  ]
+}

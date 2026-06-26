@@ -1,0 +1,13 @@
+/**
+ * __MODULE_NAME__ — module schema (DDL/migration source, NOT a runtime DB handle).
+ *
+ * `createNamespacedTable(name, suffix)` enforces the hard rule that a module's tables are
+ * namespaced `mod_<name>_*` and never touch core tables. It returns a table NAME you
+ * use in your migration DDL and in `sdk.tables.query/exec` — it does NOT hand you a live query
+ * builder. The same name must be declared in `sovecom.module.json`'s `tables` array so the
+ * manifest verifier accepts it.
+ */
+import { createNamespacedTable } from '@sovecom/module-sdk';
+
+/** `mod___MODULE_NAME___items` — this module's only table. */
+export const ITEMS_TABLE = createNamespacedTable('__MODULE_NAME__', 'items');

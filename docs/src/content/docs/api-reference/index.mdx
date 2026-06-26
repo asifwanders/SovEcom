@@ -1,0 +1,25 @@
+---
+title: API Reference
+description: Browsable reference for every SovEcom REST endpoint, generated from the OpenAPI specification.
+---
+
+SovEcom exposes its REST API over three surfaces. Each is documented endpoint-by-endpoint in its own section, generated directly from the OpenAPI specification so it never drifts from the running API.
+
+## Sections
+
+- **[Admin API](/api/admin/)** — authenticated store-management endpoints under `/admin/v1`. Admin JWT (access + refresh).
+- **[Store API](/api/store/)** — storefront endpoints under `/store/v1`. Public reads; a customer session token for cart and account.
+- **[Setup & Platform API](/api/setup/)** — first-run setup wizard, health, and file-serving endpoints.
+
+## Conventions
+
+- **Money** — integer minor units (cents) plus a separate currency code. Never floats.
+- **Timestamps** — ISO 8601, UTC.
+- **Single resource** — `{ "data": { … } }`. **Collections** — `{ "data": [ … ], "meta": { … } }`. **Errors** — `{ "error": { "code", "message", "details" } }`.
+- **Versioning** — breaking changes only at a major version bump; deprecated endpoints stay for at least 12 months after notice.
+
+## Raw specification
+
+The machine-readable OpenAPI document is served at `/admin/v1/openapi.json`, with interactive Swagger UI at `/admin/v1/docs`. Generate a typed client from it with [`@sovecom/client-js`](/guides/client-js/).
+
+Last updated: 2026-06-25

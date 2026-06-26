@@ -1,0 +1,2 @@
+DROP INDEX "customers_tenant_email_active_uq";--> statement-breakpoint
+CREATE UNIQUE INDEX "customers_tenant_email_active_uq" ON "customers" USING btree ("tenant_id",lower("email")) WHERE "customers"."deleted_at" is null and "customers"."anonymized_at" is null;

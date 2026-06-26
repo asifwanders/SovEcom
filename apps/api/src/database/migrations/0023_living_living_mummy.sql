@@ -1,0 +1,2 @@
+ALTER TABLE "discount_usages" ADD COLUMN "email" text;--> statement-breakpoint
+CREATE INDEX "discount_usages_email_discount_idx" ON "discount_usages" USING btree ("tenant_id","discount_id",lower("email"));

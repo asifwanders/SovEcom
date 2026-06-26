@@ -1,0 +1,8 @@
+{
+  "page": "home",
+  "sections": [
+    { "type": "hero", "settings": { "fullBleed": true } },
+    { "type": "featured-products", "settings": { "limit": 6 } },
+    { "type": "category-list" }
+  ]
+}

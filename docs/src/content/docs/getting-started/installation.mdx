@@ -1,0 +1,40 @@
+---
+title: Installation
+description: Install SovEcom locally with Docker Compose.
+---
+
+# Installation
+
+## Prerequisites
+
+- Node.js 24 LTS
+- pnpm 11+
+- Docker + Docker Compose
+
+## Quickstart
+
+```bash
+# Clone the repository
+git clone https://github.com/sovecom/sovecom.git
+cd sovecom
+
+# Install dependencies
+pnpm install
+
+# Start development environment
+./scripts/dev.sh
+```
+
+## Services & Ports
+
+| Service | URL | Port |
+|---|---|---|
+| API | http://localhost:3000 | 3000 |
+| Admin | http://localhost:5173 | 5173 |
+| Setup | http://localhost:5174 | 5174 |
+| Storefront | http://localhost:3001 | 3001 |
+| Postgres | localhost | 5432 |
+| Redis | localhost | 6379 |
+| Meilisearch | http://localhost:7700 | 7700 |
+
+Last updated: 2026-06-09

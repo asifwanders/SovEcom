@@ -1,0 +1,346 @@
+---
+title: Webhook Reference
+description: Complete reference for SovEcom outbound webhooks — subscriptions, event catalog, delivery envelope, signing, retry/backoff, and the inbound Stripe webhook.
+---
+
+SovEcom has two webhook flows:
+
+- **Outbound webhooks** — SovEcom POSTs signed event payloads to URLs you register. Subscribe to react to orders, refunds, or product changes in your own system.
+- **Inbound webhooks** — Stripe POSTs payment events to SovEcom at `POST /webhooks/stripe`. This endpoint is Stripe's callback path; you do not call it.
+
+---
+
+## Outbound Webhooks
+
+### Subscribing via the Admin API
+
+All subscription endpoints live under `/admin/v1/webhooks` and require a valid admin JWT.
+
+| Permission needed | Operations |
+|---|---|
+| `settings:read` | List subscriptions, query delivery log |
+| `settings:write` | Create subscription, delete subscription, retry a delivery |
+
+All operations are tenant-scoped — a subscription only ever receives events for its own tenant.
+
+#### Create a subscription
+
+```bash
+POST /admin/v1/webhooks/subscriptions
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{
+  "url": "https://your-system.example.com/hooks/sovecom",
+  "events": ["order.created", "order.paid", "refund.issued"]
+}
+```
+
+**Response (201) — the signing secret is returned exactly once:**
+
+```json
+{
+  "id": "01900000-0000-7000-8000-000000000001",
+  "url": "https://your-system.example.com/hooks/sovecom",
+  "events": ["order.created", "order.paid", "refund.issued"],
+  "active": true,
+  "createdAt": "2026-06-25T10:00:00.000Z",
+  "secret": "whsec_AABBCCDDEEFF..."
+}
+```
+
+Store `secret` securely — it is never returned again. It is used to verify the HMAC signature on every delivery.
+
+Constraints:
+- `url` — must be `https://` (or `http://` only when `WEBHOOK_ALLOW_INSECURE=true` in dev/test); maximum 2 048 characters.
+- `events` — at least one event name from the [event catalog](#event-catalog); each name must be a known value.
+- The URL is SSRF-validated at create time: the hostname is resolved and rejected if any resolved IP is loopback, private (RFC 1918), link-local, or the AWS metadata address `169.254.169.254`.
+
+#### List subscriptions
+
+```bash
+GET /admin/v1/webhooks/subscriptions
+Authorization: Bearer <admin_token>
+```
+
+Returns an array of subscription objects. The `secret` field is **never** included.
+
+#### Delete a subscription
+
+```bash
+DELETE /admin/v1/webhooks/subscriptions/:id
+Authorization: Bearer <admin_token>
+```
+
+Returns `204 No Content`. Deleting a subscription cascades and removes its entire delivery log.
+
+---
+
+### Event Catalog
+
+These are the canonical outbound event names a subscription may filter on.
+
+| Event name | When it fires | Payload type |
+|---|---|---|
+| `order.created` | A new order is placed | `OrderCreatedData` |
+| `order.paid` | Order transitions to `paid` status | `OrderStatusData` |
+| `order.shipped` | Order transitions to `shipped` status | `OrderStatusData` |
+| `order.cancelled` | Order transitions to `cancelled` status | `OrderStatusData` |
+| `order.refunded` | Order fully refunded | `OrderStatusData` |
+| `order.partially_refunded` | Order partially refunded | `OrderStatusData` |
+| `refund.issued` | A refund is issued (credit note created) | `RefundIssuedData` |
+| `product.created` | A new product is created | `ProductData` |
+| `product.updated` | A product is updated | `ProductData` |
+| `product.deleted` | A product is deleted | `ProductData` |
+
+#### Payload shapes
+
+**`OrderCreatedData`**
+
+```json
+{
+  "orderId": "01900000-0000-7000-8000-000000000010",
+  "customerId": "01900000-0000-7000-8000-000000000020"
+}
+```
+
+**`OrderStatusData`** — emitted for `order.paid`, `order.shipped`, `order.cancelled`, `order.refunded`, `order.partially_refunded`
+
+```json
+{
+  "orderId": "01900000-0000-7000-8000-000000000010",
+  "status": "paid",
+  "previousStatus": "pending"
+}
+```
+
+**`RefundIssuedData`**
+
+```json
+{
+  "refundId": "01900000-0000-7000-8000-000000000030",
+  "orderId": "01900000-0000-7000-8000-000000000010",
+  "amount": 4999,
+  "currency": "EUR",
+  "creditNoteId": "01900000-0000-7000-8000-000000000040"
+}
+```
+
+`amount` is in integer minor units (cents) plus a currency code — never a float.
+
+**`ProductData`** — emitted for `product.created`, `product.updated`, `product.deleted`
+
+```json
+{
+  "productId": "01900000-0000-7000-8000-000000000050"
+}
+```
+
+---
+
+### Delivery Envelope
+
+Every POST carries a JSON envelope wrapping the event-specific payload:
+
+```json
+{
+  "id": "01900000-0000-7000-8000-000000000099",
+  "event": "order.created",
+  "occurredAt": "2026-06-25T10:01:23.456Z",
+  "data": {
+    "orderId": "01900000-0000-7000-8000-000000000010",
+    "customerId": "01900000-0000-7000-8000-000000000020"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | UUID | Delivery ID — use this as your idempotency key. A manual retry reuses the same delivery ID. |
+| `event` | string | The event name from the catalog above. |
+| `occurredAt` | ISO 8601 | When the event was originally created (not when this delivery attempt was made). |
+| `data` | object | Event-specific payload; shape depends on `event`. |
+
+Delivery is **at-least-once** — the `id` field is the correct idempotency key to deduplicate redelivery on your side.
+
+---
+
+### Signature Verification
+
+Every delivery carries three headers:
+
+| Header | Example value | Purpose |
+|---|---|---|
+| `X-SovEcom-Signature` | `sha256=a3b4c5...` | HMAC-SHA256 of the signed string, hex-encoded |
+| `X-SovEcom-Timestamp` | `1750849283` | Unix timestamp (seconds) at signing |
+| `X-SovEcom-Nonce` | `d7e8f9...` | 32-character hex random nonce |
+
+**Signed string:** the HMAC is computed over the exact string:
+
+```
+<timestamp>.<nonce>.<raw-request-body>
+```
+
+The body is the exact bytes received on the wire.
+
+**Verification algorithm:**
+
+1. Extract `X-SovEcom-Timestamp`, `X-SovEcom-Nonce`, and `X-SovEcom-Signature` from the request headers.
+2. Reject the request if the timestamp is more than **5 minutes** in the past (replay protection).
+3. Compute `HMAC-SHA256(secret, "<timestamp>.<nonce>.<rawBody>")` using your subscription secret.
+4. Compare the result (prefixed `sha256=`) to the value of `X-SovEcom-Signature` using a constant-time comparison.
+5. If they match, process the payload. If not, return `400`.
+
+**Example verification in Node.js:**
+
+```ts
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+function verifyWebhook(
+  rawBody: Buffer,
+  secret: string,
+  timestamp: string,
+  nonce: string,
+  signature: string,
+): boolean {
+  const ageSeconds = Math.floor(Date.now() / 1000) - Number(timestamp);
+  if (ageSeconds > 300) return false; // reject if older than 5 minutes
+
+  const signed = `${timestamp}.${nonce}.${rawBody.toString()}`;
+  const expected = 'sha256=' + createHmac('sha256', secret).update(signed).digest('hex');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+```
+
+Always pass the **raw** request body (before any JSON parsing) to the HMAC — the signature covers the exact bytes sent on the wire.
+
+---
+
+### Delivery Semantics
+
+- Deliveries are made via HTTPS POST (or HTTP only when `WEBHOOK_ALLOW_INSECURE=true`).
+- The delivery timeout is 10 seconds per attempt (overridable via `WEBHOOK_DELIVERY_TIMEOUT_MS`).
+- A **2xx** response from your endpoint marks the delivery `delivered`.
+- Any non-2xx response, network error, or timeout marks it `failed` and schedules a retry.
+- The `X-Content-Type-Options` / response body from your endpoint are ignored; only the status code matters.
+- The DNS-rebinding attack is mitigated by re-resolving the hostname at delivery time (not just at subscription creation). If the hostname resolves to a private IP at delivery time, the attempt fails immediately.
+
+#### Retry and Backoff
+
+Failed deliveries are retried on a fixed exponential-ish schedule, capped at 24 hours:
+
+| Attempt | Delay before next retry |
+|---|---|
+| 1 (initial failure) | 1 minute |
+| 2 | 5 minutes |
+| 3 | 30 minutes |
+| 4 | 2 hours |
+| 5 | 6 hours |
+| 6 | 24 hours |
+| 7+ | No more automatic retries — status becomes `exhausted` |
+
+After 7 total attempts without a 2xx response the delivery is marked `exhausted` and no further automatic retries occur.
+
+The worker polls the database every 30 seconds. Deliveries within a poll cycle are processed serially, up to 20 per cycle.
+
+#### Manual Retry
+
+An admin can re-arm any `failed` or `exhausted` delivery:
+
+```bash
+POST /admin/v1/webhooks/deliveries/:id/retry
+Authorization: Bearer <admin_token>
+```
+
+Returns `{ "retried": true }`. The delivery is reset to `pending` with `next_retry_at = now()` and the worker picks it up in the next 30-second cycle. The attempt counter continues from where it left off — a delivery that was exhausted at attempt 7 and is manually retried will exhaust again if attempt 8 fails.
+
+---
+
+### Delivery Log
+
+Query the delivery log to inspect past and pending attempts:
+
+```bash
+GET /admin/v1/webhooks/deliveries?subscriptionId=<uuid>&status=failed&page=1&pageSize=20
+Authorization: Bearer <admin_token>
+```
+
+Query parameters:
+
+| Parameter | Type | Description |
+|---|---|---|
+| `subscriptionId` | UUID (optional) | Filter to a single subscription |
+| `status` | string (optional) | One of `pending`, `delivered`, `failed`, `exhausted` |
+| `page` | integer (default 1) | Page number |
+| `pageSize` | integer 1–200 (default 20) | Results per page |
+
+Each delivery record includes:
+
+| Field | Description |
+|---|---|
+| `id` | Delivery UUID (the envelope idempotency key) |
+| `event` | Event name |
+| `status` | `pending` / `delivered` / `failed` / `exhausted` |
+| `attempts` | How many delivery attempts have been made |
+| `lastAttemptAt` | Timestamp of the last attempt |
+| `nextRetryAt` | When the next automatic retry is scheduled (null if `delivered` or `exhausted`) |
+| `responseCode` | HTTP status code from the last attempt (null on network error) |
+| `lastError` | Short error string (never includes the secret or signature) |
+
+---
+
+### Module Event Subscriptions
+
+Modules subscribe to a separate, SDK-managed event bus rather than to outbound webhook subscriptions. The module SDK exposes two additional event contracts that are not part of the outbound webhook surface:
+
+- `product.price_changed` — fires when a variant's price changes from one non-equal value to another. Payload includes `productId`, `variantId`, `oldPriceMinor`, `newPriceMinor`, `currency`, and a unique `eventId`.
+- `product.stock_changed` — fires when a variant's availability crosses the zero-stock boundary. Payload includes `productId`, `variantId`, `available` (boolean), and `eventId`.
+
+These events are delivered in-process to module worker handlers, not via HTTP POST. See [/guides/modules/](/guides/modules/) for how to subscribe from a module.
+
+---
+
+## Inbound Webhooks (Stripe → SovEcom)
+
+Stripe calls `POST /webhooks/stripe` to notify SovEcom of payment events. This endpoint is:
+
+- **Public** — no `Authorization` header is required (Stripe cannot send one).
+- **Signature-verified** — every request is verified with the `stripe-signature` header against `STRIPE_WEBHOOK_SECRET` before any action is taken. An unsigned or forged body is rejected with `400`.
+- **Idempotent** — duplicate Stripe events are deduplicated by Stripe event ID.
+
+The Stripe events consumed internally are:
+
+| Stripe event | SovEcom action |
+|---|---|
+| `payment_intent.succeeded` | Transitions order to `paid` |
+| `payment_intent.processing` | Records payment as processing |
+| `payment_intent.payment_failed` | Records payment failure |
+| `charge.dispute.created` | Opens a dispute record |
+| `charge.dispute.updated` | Updates dispute status |
+| `charge.dispute.closed` | Closes dispute record |
+| `refund.created` | Records refund |
+| `refund.updated` | Updates refund status |
+| `charge.refunded` | Reconciles charge refund state |
+
+You do not register this endpoint — it is configured in your Stripe dashboard pointing at your SovEcom API host. See the operator deployment guide for `STRIPE_WEBHOOK_SECRET` configuration.
+
+---
+
+## Security Notes
+
+- The signing secret (`whsec_…`) is generated server-side, returned once, and stored encrypted at rest (AES-256-GCM). It is never returned by list endpoints and never appears in logs.
+- The HMAC signed string binds the timestamp and nonce so a captured request cannot be replayed with a fresh timestamp.
+- Reject deliveries with a timestamp older than 5 minutes.
+- Subscription URLs must resolve to public IP addresses — loopback, RFC 1918, link-local, and cloud metadata addresses are rejected both at subscription creation and again at delivery time (DNS-rebinding protection).
+
+---
+
+## Related
+
+- [Modules](/guides/modules/) — subscribing to in-process module events from the SDK
+- [Custom Endpoints](/guides/custom-endpoints/) — exposing your own HTTP endpoints from a module
+- [Client JS](/guides/client-js/) — storefront SDK
+
+Last updated: 2026-06-25

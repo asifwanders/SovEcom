@@ -1,0 +1,25 @@
+/**
+ * __THEME_NAME__ — a SovEcom theme.
+ *
+ * A theme is a declarative ASSET: NO worker, NO runtime entrypoint, NO runtime lifecycle hook, NO
+ * capabilities, NO namespaced tables. `defineTheme(config)` validates your config
+ * against the SAME manifest schema the core runs at install time and returns the typed, validated
+ * `ThemeManifest` — a build-/author-time helper, never a runtime entry. A misconfigured theme
+ * fails fast here with a clear message, not as an opaque install rejection.
+ *
+ * The authored object below mirrors `sovecom.theme.json` (which is the artifact the core ingests).
+ * Keep them in sync — this file is the typed, validated authoring view of that manifest.
+ */
+import { defineTheme } from '@sovecom/theme-sdk';
+import { slots } from './slots.js';
+
+export const theme = defineTheme({
+  name: '__THEME_NAME__',
+  displayName: '__THEME_NAME__',
+  version: '0.1.0',
+  compatibleCore: '^1.0.0',
+  slots,
+  settingsSchema: 'settings.schema.json',
+});
+
+export default theme;

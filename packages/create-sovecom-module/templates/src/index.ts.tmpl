@@ -1,0 +1,48 @@
+/**
+ * __MODULE_NAME__ — a SovEcom module.
+ *
+ * A module is a single `activate(sdk)` body. `sdk` is the capability object the core broker hands
+ * you (the ONLY channel to core): `store`, `admin`, `tables`, `events`, `http`, and `serve`. Every
+ * method is one gated broker call — the permissions you declare in `sovecom.module.json` decide
+ * what core lets through; the SDK cannot widen them.
+ *
+ * This starter touches exactly the permissions it declares: `read:products`, `write:own_tables`,
+ * and `subscribe:events`. Remove the parts you don't need AND drop the matching permission from
+ * the manifest — declare the minimum.
+ */
+import { defineModule } from '@sovecom/module-sdk';
+import { ITEMS_TABLE } from './db/schema';
+
+export default defineModule({
+  async activate(sdk) {
+    // read:products — read the catalog through the gated store client.
+    const products = await sdk.store.products.list({ limit: 5 });
+    // eslint-disable-next-line no-console
+    console.log(`[__MODULE_NAME__] loaded ${products.items.length} product(s)`);
+
+    // write:own_tables — parameterized SQL against THIS module's own namespaced table only.
+    await sdk.tables.exec(
+      `CREATE TABLE IF NOT EXISTS ${ITEMS_TABLE} (id text primary key, note text)`,
+    );
+
+    // subscribe:events — react to a core event. Register all handlers during activate().
+    await sdk.events.on('order.paid', async (payload) => {
+      // eslint-disable-next-line no-console
+      console.log('[__MODULE_NAME__] order.paid', payload);
+      await sdk.tables.exec(`INSERT INTO ${ITEMS_TABLE} (id, note) VALUES ($1, $2)`, [
+        crypto.randomUUID(),
+        'order.paid seen',
+      ]);
+    });
+
+    // Serve a tiny HTTP endpoint. Core mounts it under /{store,admin}/v1/modules/__MODULE_NAME__/*
+    // and proxies matching requests here. At most one handler; the last call wins.
+    sdk.serve(async (req) => {
+      if (req.method === 'GET' && req.path === '/items') {
+        const { rows } = await sdk.tables.query(`SELECT id, note FROM ${ITEMS_TABLE} LIMIT 50`);
+        return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify(rows) };
+      }
+      return { status: 404, body: 'not found' };
+    });
+  },
+});

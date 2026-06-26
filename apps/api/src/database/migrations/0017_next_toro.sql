@@ -1,0 +1,1 @@
+CREATE INDEX "setup_tokens_token_hash_idx" ON "setup_tokens" USING btree ("token_hash");

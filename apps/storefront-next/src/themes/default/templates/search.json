@@ -1,0 +1,16 @@
+{
+  "page": "search",
+  "sections": [
+    {
+      "type": "columns",
+      "regions": {
+        "left": [{ "type": "search-filter-sidebar" }],
+        "right": [
+          { "type": "search-results-header" },
+          { "type": "search-product-grid" },
+          { "type": "search-pagination" }
+        ]
+      }
+    }
+  ]
+}

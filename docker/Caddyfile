@@ -1,0 +1,31 @@
+# Edge reverse proxy for the full prod-like compose.
+# Subdomain routing: each app is served at its own host root, so the SPAs need
+# no base-path rewriting. *.localhost resolves to 127.0.0.1 in browsers, so this
+# works locally; in real deployments these map to real subdomains.
+{
+	auto_https off
+}
+
+# Storefront (Next.js) — the public site, at the root host.
+http://localhost, http://storefront.localhost {
+	reverse_proxy storefront:3001
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Admin SPA
+http://admin.localhost {
+	reverse_proxy admin:80
+}
+
+# Setup wizard SPA
+http://setup.localhost {
+	reverse_proxy setup:80
+}
+
+# API (REST) — incl. /health
+http://api.localhost {
+	reverse_proxy api:3000
+}

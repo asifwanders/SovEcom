@@ -1,0 +1,805 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      # OpenAPI e2e boots the app with dummy env (no live services needed)
+      - run: pnpm --filter @sovecom/api test:e2e
+
+  # The committed OpenAPI spec and the generated @sovecom/client-js types form the typed-client
+  # contract. Regenerate both from live AppModule metadata (no DB/Redis/Meili — the dump skips
+  # app.init()) and fail if the working tree changed: that means a controller/DTO moved without
+  # someone running `pnpm --filter @sovecom/api openapi:dump` +
+  # `pnpm --filter @sovecom/client-js generate`. Keeps the typed client faithful to the API.
+  openapi-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @sovecom/api openapi:dump
+      - run: pnpm --filter @sovecom/client-js generate
+      - name: Fail if the spec or generated client is stale
+        run: |
+          if ! git diff --exit-code -- apps/api/openapi.json packages/client-js/src/generated/api.ts; then
+            echo "::error::OpenAPI spec or generated client is out of date. Run 'pnpm --filter @sovecom/api openapi:dump && pnpm --filter @sovecom/client-js generate' and commit the result." >&2
+            exit 1
+          fi
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17 # postgres 17 + pgvector for the `vector` extension
+        env:
+          POSTGRES_USER: sovecom
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: sovecom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sovecom"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      meilisearch:
+        image: getmeili/meilisearch:v1.8
+        env:
+          MEILI_MASTER_KEY: testkey
+          MEILI_NO_ANALYTICS: 'true'
+        ports:
+          - 7700:7700
+    # NOTE: MinIO runs as an explicit step (below), not a `services:` container.
+    # The minio/minio image needs a `server /data` command, which service
+    # containers can't override; running it as a step lets us pin the SAME image
+    # used in docker-compose.dev and health-check it with the runner's curl. The
+    # integration test creates the `sovecom-test` bucket itself.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start MinIO
+        # Same pinned image as docker-compose.dev; health-checked with the
+        # runner's curl. The integration test creates the bucket on boot.
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2024-11-07T00-52-20Z server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then echo "minio ready"; exit 0; fi
+            sleep 2
+          done
+          echo "minio did not become ready" >&2
+          docker logs minio || true
+          exit 1
+      - name: Wait for Meilisearch
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7700/health; then echo "meilisearch ready"; exit 0; fi
+            sleep 2
+          done
+          echo "meilisearch did not become ready" >&2
+          exit 1
+      - name: Integration tests
+        env:
+          DATABASE_URL: postgres://sovecom:test@localhost:5432/sovecom_test
+          REDIS_URL: redis://localhost:6379
+          MEILISEARCH_URL: http://localhost:7700
+          MEILI_MASTER_KEY: testkey
+          S3_ENDPOINT: http://localhost:9000
+          S3_BUCKET: sovecom-test
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+          S3_FORCE_PATH_STYLE: 'true'
+          S3_REGION: us-east-1
+        run: pnpm --filter @sovecom/api test:integration
+
+  # Performance benchmark gate. autocannon hits the public store endpoints against a freshly-seeded
+  # API (1000 products) with the store rate limit raised; thresholds (+20% CI margin) fail the
+  # build on regression, and the results table is posted as a PR comment.
+  benchmark:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: sovecom
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: sovecom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sovecom"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      meilisearch:
+        image: getmeili/meilisearch:v1.8
+        env:
+          MEILI_MASTER_KEY: testkey
+          MEILI_NO_ANALYTICS: 'true'
+        ports:
+          - 7700:7700
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Gate-logic self-check
+        run: pnpm bench:check
+      - name: Wait for Meilisearch
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7700/health; then echo "meilisearch ready"; exit 0; fi
+            sleep 2
+          done
+          echo "meilisearch did not become ready" >&2
+          exit 1
+      - name: Run benchmarks
+        env:
+          CI: 'true'
+          DATABASE_URL: postgres://sovecom:test@localhost:5432/sovecom_test
+          REDIS_URL: redis://localhost:6379
+          MEILISEARCH_URL: http://localhost:7700
+          MEILI_MASTER_KEY: testkey
+          MASTER_KEY: KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio= # base64 of 32 bytes (test only)
+          JWT_SECRET: bench-jwt-secret-bench-jwt-secret-32chars
+          STORE_RATE_LIMIT: '1000000'
+        run: pnpm bench:full
+      - name: Post results as PR comment
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'scripts/benchmarks/bench-results.md';
+            if (!fs.existsSync(path)) return;
+            const body = fs.readFileSync(path, 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+  concurrency:
+    # A dedicated, merge-blocking job for the flake-prone race / no-data-loss suites
+    # (test/concurrency/**), isolated from `integration` so it shows as its own check.
+    # Mirrors the integration job's services + env.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17 # postgres 17 + pgvector for the `vector` extension
+        env:
+          POSTGRES_USER: sovecom
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: sovecom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sovecom"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      meilisearch:
+        image: getmeili/meilisearch:v1.8
+        env:
+          MEILI_MASTER_KEY: testkey
+          MEILI_NO_ANALYTICS: 'true'
+        ports:
+          - 7700:7700
+    # MinIO runs as an explicit step (below), same as the integration job — the
+    # minio image needs a `server /data` command service containers can't override.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2024-11-07T00-52-20Z server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then echo "minio ready"; exit 0; fi
+            sleep 2
+          done
+          echo "minio did not become ready" >&2
+          docker logs minio || true
+          exit 1
+      - name: Wait for Meilisearch
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7700/health; then echo "meilisearch ready"; exit 0; fi
+            sleep 2
+          done
+          echo "meilisearch did not become ready" >&2
+          exit 1
+      - name: Concurrency tests
+        env:
+          DATABASE_URL: postgres://sovecom:test@localhost:5432/sovecom_test
+          REDIS_URL: redis://localhost:6379
+          MEILISEARCH_URL: http://localhost:7700
+          MEILI_MASTER_KEY: testkey
+          S3_ENDPOINT: http://localhost:9000
+          S3_BUCKET: sovecom-test
+          S3_ACCESS_KEY: minioadmin
+          S3_SECRET_KEY: minioadmin
+          S3_FORCE_PATH_STYLE: 'true'
+          S3_REGION: us-east-1
+        run: pnpm --filter @sovecom/api test:concurrency
+
+  # Storefront browser E2E job — the gate for acceptance criteria jsdom/Vitest cannot run: real axe
+  # a11y, JSON-LD parsed from the rendered DOM, mobile+desktop smoke, Lighthouse PageSpeed. Boots
+  # the same services as the integration job (Postgres/Redis/Meilisearch + MinIO), migrates + seeds
+  # the API, starts the API server, then builds + starts the storefront and runs Playwright against
+  # it. A separate job (parallel to integration) so it doesn't slow the others; intentionally NOT
+  # in `build.needs`.
+  storefront-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17 # postgres 17 + pgvector for the `vector` extension
+        env:
+          POSTGRES_USER: sovecom
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: sovecom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sovecom"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      meilisearch:
+        image: getmeili/meilisearch:v1.8
+        env:
+          MEILI_MASTER_KEY: testkey
+          MEILI_NO_ANALYTICS: 'true'
+        ports:
+          - 7700:7700
+    env:
+      DATABASE_URL: postgres://sovecom:test@localhost:5432/sovecom_test
+      REDIS_URL: redis://localhost:6379
+      MEILISEARCH_URL: http://localhost:7700
+      MEILI_MASTER_KEY: testkey
+      # The booted API (real `nest start`, unlike the jest integration harness) needs its own boot env:
+      # MASTER_KEY is the 32-byte AEAD key (base64) AeadService loads at startup; JWT_SECRET is read
+      # lazily when tokens are signed (the public storefront E2E never signs, but set it for safety).
+      # These are throwaway CI values for an ephemeral test DB, not real secrets.
+      MASTER_KEY: s7GwdwNFxt4wM8sJWf0AoDi/YyY7/IfqwAYJrKNVRNA=
+      JWT_SECRET: e2e-ci-jwt-secret-not-a-real-secret-32b-minimum-abcdef0123456789
+      # The storefront E2E exercises no uploads, so use the local storage adapter (driver default) with
+      # a WRITABLE runner path — the default `/data/uploads` isn't writable, which 503s the /health probe.
+      STORAGE_DRIVER: local
+      LOCAL_STORAGE_PATH: /tmp/sovecom-e2e-uploads
+      API_PORT: '3000'
+      # The storefront fetches /store/v1/* from the booted API; canonical/sitemap URLs use the site URL.
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3000
+      NEXT_PUBLIC_SITE_URL: http://localhost:3001
+      # The storefront makes credentialed cross-origin cart/checkout calls to the API. The API CORS
+      # allowlist only honours explicit origins with credentials:true, so the storefront origin MUST
+      # be allow-listed via STORE_ORIGIN or every cart mutation is CORS-blocked.
+      # :3001→:3000 are same-site (localhost), so the sov_cart/refresh cookies ride along.
+      STORE_ORIGIN: http://localhost:3001
+      # Seed the deterministic cart/checkout catalog fixture (a published product + an in-stock and a
+      # sold-out variant) so the transactional E2E can navigate. OFF for a real install; the
+      # baseline-resilient catalog specs still pass with it present.
+      SEED_E2E_FIXTURE: '1'
+      # A Stripe TEST-mode PUBLISHABLE key. Publishable keys are NOT secret (pk_test_* is safe in
+      # CI env / commits) — it only lets the storefront's payment step render past its config-error
+      # state. This is a clearly-fake TEST placeholder, NOT a real key. The API has NO Stripe SECRET
+      # in CI, so it cannot mint a real clientSecret: the default run asserts the flow REACHES the
+      # payment step UI; the live PaymentElement mount/confirm is gated behind E2E_STRIPE_LIVE (a
+      # real Stripe test SECRET in the API) and test.skip()ped here.
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_e2e_placeholder_not_a_real_key_00000000000000000000
+      # The job starts the storefront itself — Playwright reuses it instead of starting a second one.
+      E2E_SKIP_WEBSERVER: '1'
+      E2E_BASE_URL: http://localhost:3001
+      # The credential E2E (change-email confirm + forgot/reset) reads the plaintext single-use token
+      # the credential services mirror to Redis. That mirror is hard-gated on NODE_ENV=test AND the
+      # per-flow sink flag, so a non-test stack can never leak it. NODE_ENV=test is the same mode the
+      # API's Jest integration suite already boots in (safe for an ephemeral CI DB). The credentials
+      # spec `skipIfNoSink()`-guards the sink-dependent cases; without these flags the suite stays
+      # green by skipping them — these flags ACTIVATE them in CI.
+      NODE_ENV: test
+      RESET_TOKEN_SINK: '1'
+      EMAIL_CHANGE_TOKEN_SINK: '1'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Wait for Meilisearch
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7700/health; then echo "meilisearch ready"; exit 0; fi
+            sleep 2
+          done
+          echo "meilisearch did not become ready" >&2
+          exit 1
+      - name: Run DB migrations
+        run: pnpm --filter @sovecom/api migrate:up
+      - name: Seed baseline + E2E catalog fixture (tenant + legal pages + tax/shipping + product)
+        # Creates the published legal `pages` (FR+EN) the storefront renders + tax/shipping config, AND —
+        # because SEED_E2E_FIXTURE=1 is set at the job level (above) — the deterministic cart/checkout
+        # fixture (a published product with an in-stock + a sold-out variant). The catalog-resilient
+        # specs still pass with the product present; the transactional cart/checkout specs need it.
+        run: pnpm --filter @sovecom/api seed
+      - name: Build the API (and its workspace deps)
+        # The `...` suffix builds @sovecom/api AND its workspace dependencies (module-sdk, theme-sdk,
+        # core, …). `nest start` resolves those deps to their built `dist/` at boot, so building the
+        # API alone leaves @sovecom/module-sdk/dist missing and the server fails to start.
+        run: pnpm --filter "@sovecom/api..." build
+      - name: Start the API server
+        # Background-start the built API and wait on its public /health readiness probe.
+        run: |
+          pnpm --filter @sovecom/api start > /tmp/api.log 2>&1 &
+          echo "API_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/health; then echo "api ready"; exit 0; fi
+            sleep 2
+          done
+          echo "api did not become ready" >&2
+          cat /tmp/api.log || true
+          exit 1
+      - name: Build the storefront
+        run: pnpm --filter @sovecom/storefront-next build
+      - name: Start the storefront
+        # Background-start the built storefront (:3001) and wait until it answers.
+        run: |
+          pnpm --filter @sovecom/storefront-next start > /tmp/storefront.log 2>&1 &
+          echo "STOREFRONT_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3001/en > /dev/null; then echo "storefront ready"; exit 0; fi
+            sleep 2
+          done
+          echo "storefront did not become ready" >&2
+          cat /tmp/storefront.log || true
+          exit 1
+      - name: Warm the storefront ISR cache
+        # The catalog/legal/content routes are ISR (revalidate 300). Their FIRST request triggers
+        # on-demand SSR generation (which SSR-fetches the API); a COLD generation can exceed
+        # Playwright's 10s assertion window, leaving the route on its loading skeleton (no <article>)
+        # and flaking the a11y gate on a random legal page. Pre-generate every page the E2E visits
+        # here — OUTSIDE the timed tests — so the tests hit warm, cached content. Verify the legal
+        # pages actually render their <article> (the skeleton does not), failing fast on a real defect.
+        run: |
+          set +e
+          for loc in en fr; do
+            # Catalog/static routes are ISR — warm them so the first timed assertion hits cached content.
+            # The seeded PDP (/product/e2e-tee) is ISR too; warm it so the cart/checkout spec's first PDP
+            # load is warm. The /cart + /checkout shells are CLIENT-rendered (not ISR) so they don't need
+            # ISR pre-generation, but we curl them to confirm the new routes don't error at shell render.
+            for p in "" /products /category /search /product/e2e-tee /cart /checkout; do
+              curl -s --max-time 30 "http://localhost:3001/${loc}${p}" > /dev/null
+            done
+          done
+          fail=0
+          for loc in en fr; do
+            for slug in privacy terms cookies legal-notice withdrawal; do
+              url="http://localhost:3001/${loc}/${slug}"
+              ok=0
+              for attempt in $(seq 1 15); do
+                if curl -s --max-time 30 "$url" | grep -q "</article>"; then ok=1; break; fi
+                sleep 2
+              done
+              if [ "$ok" = 1 ]; then echo "warmed $url"; else echo "FAILED to warm $url" >&2; fail=1; fi
+            done
+          done
+          exit $fail
+      - name: Install Playwright chromium
+        # Browser download is a dedicated CI step (NOT a pnpm postinstall — keeps frozen-install clean).
+        run: pnpm --filter @sovecom/storefront-next exec playwright install --with-deps chromium
+      - name: Run Playwright E2E (a11y + JSON-LD + smoke, mobile + desktop)
+        run: pnpm --filter @sovecom/storefront-next test:e2e
+      - name: Lighthouse (PageSpeed >= 90 — soft/non-blocking)
+        # Reported, not enforced: Lighthouse scores are environment-sensitive and flaky as a hard gate
+        # on shared runners (see e2e/README). The scores are surfaced in the log + the artifact below.
+        continue-on-error: true
+        run: pnpm --filter @sovecom/storefront-next exec lhci autorun
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-report
+          path: apps/storefront-next/playwright-report
+          retention-days: 7
+      - name: Upload Lighthouse report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lighthouse-report
+          path: apps/storefront-next/.lighthouseci
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # CVE/audit SCA gate. The production tree is the real shipped attack surface, so the
+  # `pnpm audit --prod --audit-level=high` step is the enforced, merge-blocking gate (no
+  # continue-on-error on the job or the prod step). The full-tree report stays report-only
+  # (dev-only advisories like the vitest UI critical must not wedge main).
+  # If a new prod HIGH lands, this step fails the job by design — fix the advisory, do not
+  # re-add continue-on-error.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Full-tree report (visibility only) — dev-only advisories must not block.
+      - name: pnpm audit (full tree, high+, report-only)
+        continue-on-error: true
+        run: pnpm audit --audit-level=high
+      # ENFORCED GATE: production tree only. A prod HIGH here fails the job. `if: always()`
+      # so the enforced gate still runs even if the report-only step above errors hard.
+      - name: pnpm audit --prod (high+, ENFORCED)
+        if: always()
+        run: pnpm audit --prod --audit-level=high
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test, openapi-drift, integration, concurrency, audit]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+  # Admin SPA E2E. Seeds the admin principal (SEED_E2E_FIXTURE → real password + installed=true),
+  # boots the API with ADMIN_ORIGIN so CORS lets the cross-origin SPA talk to it, builds + previews
+  # the admin (:4173, API base baked in), and runs Playwright.
+  admin-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: sovecom
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: sovecom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sovecom"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      meilisearch:
+        image: getmeili/meilisearch:v1.8
+        env:
+          MEILI_MASTER_KEY: testkey
+          MEILI_NO_ANALYTICS: 'true'
+        ports:
+          - 7700:7700
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgres://sovecom:test@localhost:5432/sovecom_test
+      REDIS_URL: redis://localhost:6379
+      MEILISEARCH_URL: http://localhost:7700
+      MEILI_MASTER_KEY: testkey
+      MASTER_KEY: s7GwdwNFxt4wM8sJWf0AoDi/YyY7/IfqwAYJrKNVRNA=
+      JWT_SECRET: e2e-ci-jwt-secret-not-a-real-secret-32b-minimum-abcdef0123456789
+      STORAGE_DRIVER: local
+      LOCAL_STORAGE_PATH: /tmp/sovecom-admin-e2e-uploads
+      API_PORT: '3000'
+      SEED_E2E_FIXTURE: '1' # admin@default.local gets a real password + installed=true
+      ADMIN_ORIGIN: http://localhost:4173 # CORS allowlist for the previewed admin SPA
+      VITE_API_BASE_URL: http://localhost:3000 # baked into the admin build
+      E2E_SKIP_WEBSERVER: '1' # the job starts its own preview; don't let Playwright start a second
+      # Module install/extract root. MUST be writable AND fully resolved (no symlink in the path):
+      # the module worker forks with Node's permission model and `--allow-fs-read` can't traverse a
+      # symlinked path (the macOS `/var`→`/private/var` quirk that keeps the worker descriptor
+      # skipped locally). On the Linux runner `/tmp` is a real dir, so this lets the admin
+      # install+enable execute in CI. (Without it the default `/data` isn't writable → install 422 →
+      # `module-install.spec.ts` all-skips.)
+      MODULES_DATA_PATH: /tmp/sovecom-admin-e2e-modules
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Wait for Meilisearch
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7700/health; then echo "meilisearch ready"; exit 0; fi
+            sleep 2
+          done
+          echo "meilisearch did not become ready" >&2
+          exit 1
+      - run: pnpm --filter @sovecom/api migrate:up
+      - run: pnpm --filter @sovecom/api seed
+      - run: pnpm --filter "@sovecom/api..." build
+      # Pack the bundled modules into installable .tgz (scenario 16): module-install.spec.ts uploads
+      # apps/api/bundled-modules/reviews.tgz through the admin UI. The .tgz are gitignored build
+      # artifacts, so pack them here; without this the install test skips (no tarball to upload).
+      - run: pnpm pack:bundled-modules
+      - name: Start the API server (ADMIN_ORIGIN allowlisted)
+        run: |
+          pnpm --filter @sovecom/api start > /tmp/api.log 2>&1 &
+          echo "API_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/health; then echo "api ready"; exit 0; fi
+            sleep 2
+          done
+          echo "api did not become ready" >&2
+          cat /tmp/api.log || true
+          exit 1
+      - name: Build + preview the admin SPA
+        run: |
+          pnpm --filter @sovecom/admin build
+          pnpm --filter @sovecom/admin exec vite preview --port 4173 --strictPort > /tmp/admin.log 2>&1 &
+          echo "ADMIN_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4173 > /dev/null; then echo "admin ready"; exit 0; fi
+            sleep 2
+          done
+          echo "admin did not become ready" >&2
+          cat /tmp/admin.log || true
+          exit 1
+      - name: Install Playwright chromium
+        run: pnpm --filter @sovecom/admin exec playwright install --with-deps chromium
+      - name: Run admin E2E
+        run: pnpm --filter @sovecom/admin test:e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: admin-e2e-report
+          path: apps/admin/playwright-report/
+          retention-days: 7
+
+  # Setup SPA E2E — scenario: fresh install + wizard completion. Needs a NOT-installed DB (baseline
+  # seed WITHOUT SEED_E2E_FIXTURE → installed=false), the one-time setup token (SetupBootService
+  # mints + logs it at boot — grepped from the API log into SETUP_TOKEN_PLAINTEXT; only its hash is
+  # stored, so it can't be read from the DB), and the admin-account OTP (emailed, never logged —
+  # the wizard's SMTP step points at the MailHog service; the spec reads the code back over
+  # MailHog's HTTP API). The SPA is built with VITE_API_BASE_URL="" and previewed; the preview proxy
+  # forwards /setup + /health to the API same-origin (no CORS change, since CORS never allows the
+  # setup origin). The API runs with NODE_ENV=development (NOT test): under NODE_ENV=test the boot
+  # banner + token mint are suppressed, so there'd be no token to read.
+  setup-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: sovecom
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: sovecom_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sovecom"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      meilisearch:
+        image: getmeili/meilisearch:v1.8
+        env:
+          MEILI_MASTER_KEY: testkey
+          MEILI_NO_ANALYTICS: 'true'
+        ports:
+          - 7700:7700
+      mailhog:
+        # The dev mail sink the wizard's SMTP step targets; the admin-account OTP is read back over
+        # its HTTP API (:8025). SMTP on :1025.
+        image: mailhog/mailhog:v1.0.0
+        ports:
+          - 1025:1025
+          - 8025:8025
+    env:
+      # NODE_ENV=development (NOT test) so SetupBootService mints + prints the setup token at boot.
+      NODE_ENV: development
+      DATABASE_URL: postgres://sovecom:test@localhost:5432/sovecom_test
+      REDIS_URL: redis://localhost:6379
+      MEILISEARCH_URL: http://localhost:7700
+      MEILI_MASTER_KEY: testkey
+      MASTER_KEY: s7GwdwNFxt4wM8sJWf0AoDi/YyY7/IfqwAYJrKNVRNA=
+      JWT_SECRET: e2e-ci-jwt-secret-not-a-real-secret-32b-minimum-abcdef0123456789
+      STORAGE_DRIVER: local
+      LOCAL_STORAGE_PATH: /tmp/sovecom-setup-e2e-uploads
+      API_PORT: '3000'
+      # The wizard's SMTP step posts these; env-mail also points at MailHog (start precondition).
+      SMTP_HOST: localhost
+      SMTP_PORT: '1025'
+      MAIL_FROM: setup@sovecom.local
+      SETUP_URL: http://localhost:4174/setup
+      MAILHOG_API_URL: http://localhost:8025
+      SETUP_API_URL: http://localhost:3000 # the spec's out-of-band status assertion
+      SETUP_API_TARGET: http://localhost:3000 # the preview proxy's API target (vite.config.ts)
+      E2E_SKIP_WEBSERVER: '1' # the job starts its own preview; don't let Playwright start a second
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Wait for Meilisearch
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7700/health; then echo "meilisearch ready"; exit 0; fi
+            sleep 2
+          done
+          echo "meilisearch did not become ready" >&2
+          exit 1
+      # Fresh-install DB: migrate + BASELINE seed (NO SEED_E2E_FIXTURE → installed=false).
+      - run: pnpm --filter @sovecom/api migrate:up
+      - run: pnpm --filter @sovecom/api seed
+      - run: pnpm --filter "@sovecom/api..." build
+      - name: Start the API server (mints + logs the setup token)
+        run: |
+          pnpm --filter @sovecom/api start > /tmp/setup-api.log 2>&1 &
+          echo "API_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/health; then echo "api ready"; break; fi
+            sleep 2
+          done
+          if ! curl -sf http://localhost:3000/health; then
+            echo "api did not become ready" >&2; cat /tmp/setup-api.log || true; exit 1
+          fi
+      - name: Read the one-time setup token from the boot banner
+        run: |
+          TOKEN=$(grep -A3 "Enter this one-time setup token" /tmp/setup-api.log \
+            | sed -E 's/\x1b\[[0-9;]*m//g' \
+            | grep -E '^[[:space:]]+[A-Za-z0-9_-]{20,}[[:space:]]*$' | head -1 | tr -d '[:space:]')
+          if [ -z "$TOKEN" ]; then echo "no setup token in the banner" >&2; cat /tmp/setup-api.log; exit 1; fi
+          echo "SETUP_TOKEN_PLAINTEXT=$TOKEN" >> "$GITHUB_ENV"
+          echo "read a ${#TOKEN}-char setup token"
+      - name: Build + preview the setup SPA (relative API base)
+        env:
+          VITE_API_BASE_URL: '' # relative /setup/v1 + /health, proxied same-origin by the preview
+        run: |
+          pnpm --filter @sovecom/setup build
+          pnpm --filter @sovecom/setup exec vite preview --port 4174 --strictPort > /tmp/setup-preview.log 2>&1 &
+          echo "PREVIEW_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4174 > /dev/null; then echo "setup ready"; exit 0; fi
+            sleep 2
+          done
+          echo "setup preview did not become ready" >&2
+          cat /tmp/setup-preview.log || true
+          exit 1
+      - name: Install Playwright chromium
+        run: pnpm --filter @sovecom/setup exec playwright install --with-deps chromium
+      - name: Run setup E2E
+        run: pnpm --filter @sovecom/setup test:e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: setup-e2e-report
+          path: apps/setup/playwright-report/
+          retention-days: 7

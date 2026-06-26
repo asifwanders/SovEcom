@@ -1,0 +1,29 @@
+name: 🔒 Security Disclosure (read first)
+description: How to report a security vulnerability — please do NOT file it here.
+title: "[Do not file security reports as public issues]"
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # 🛑 Stop — do not report security vulnerabilities in a public issue.
+
+        Publicly disclosing a vulnerability before a fix is released puts every SovEcom merchant and their customers at risk.
+
+        ## Report privately instead:
+
+        - **Email:** `security@sovecom.io` (PGP key in [SECURITY.md](../../SECURITY.md))
+        - **Or** use [GitHub private vulnerability reporting](../../security/advisories/new)
+
+        You can expect an initial response within **48 hours** and a **90-day** disclosure window from confirmed receipt. See our full [Security Policy](../../SECURITY.md).
+
+        ---
+
+        If you opened this template by mistake for a non-security issue, please close it and use the Bug Report or Feature Request template instead.
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: Acknowledgement
+      options:
+        - label: I understand that I should report security issues privately and NOT in this public tracker.
+          required: true

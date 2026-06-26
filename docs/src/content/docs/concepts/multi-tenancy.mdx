@@ -1,0 +1,16 @@
+---
+title: Multi-tenancy
+description: Understand SovEcom's multi-tenancy architecture.
+---
+
+# Multi-tenancy
+
+SovEcom v1.0 is single-tenant, but every table includes a `tenant_id` column to support a future multi-tenant cloud deployment.
+
+## Tenant Isolation
+
+- Every query scopes by `tenant_id`
+- Cache keys include tenant prefix
+- Search indexes are tenant-scoped
+
+Last updated: 2026-06-09
