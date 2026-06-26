@@ -75,6 +75,21 @@ export class FakeTables implements TablesClient {
       return Promise.resolve({ rows: [], rowCount: 0 });
     }
 
+    // recordView row-cap prune: DELETE FROM ... WHERE viewer_key = $1 AND id NOT IN (SELECT ... LIMIT $2)
+    if (s.startsWith('DELETE') && s.includes('id NOT IN')) {
+      const viewerKey = String(params[0]);
+      const cap = Number(params[1]);
+      // Keep only the most-recent `cap` rows for this viewer; delete the rest.
+      const viewerRows = this.views
+        .filter((r) => r.viewer_key === viewerKey)
+        .sort((a, b) => cmpRecent(a, b));
+      const keepIds = new Set(viewerRows.slice(0, cap).map((r) => r.id));
+      const before = this.views.length;
+      this.views = this.views.filter((r) => r.viewer_key !== viewerKey || keepIds.has(r.id));
+      const deleted = before - this.views.length;
+      return Promise.resolve({ rows: [], rowCount: deleted });
+    }
+
     // mergeGuestToCustomer delete: DELETE FROM ... WHERE viewer_key = $1 AND product_id = $2 RETURNING id
     if (s.startsWith('DELETE') && s.includes('viewer_key = $1') && s.includes('product_id = $2')) {
       const viewerKey = String(params[0]);

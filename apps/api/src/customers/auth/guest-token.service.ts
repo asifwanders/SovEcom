@@ -7,7 +7,7 @@
  * addresses, payment methods, or any account data.
  *
  * TOKEN SHAPE (compact, not JWT to avoid confusion with customer JWTs):
- *   base64url(JSON { guestId: UUID, tenantId: string }) + "." + base64url(HMAC-SHA256)
+ *   base64url(JSON { guestId: UUID, tenantId: string, iat: number }) + "." + base64url(HMAC-SHA256)
  *
  * SIGNING: HMAC-SHA256 over the payload with STORAGE_SIGNING_SECRET. A dedicated
  * GUEST_TOKEN_SECRET is preferred when set; STORAGE_SIGNING_SECRET is the safe fallback so
@@ -21,11 +21,9 @@
  *   sameSite: 'lax'     -- rides on top-level navigations; 'strict' would break cross-site
  *                          links back to the storefront; 'none' would require Secure always.
  *                          Lax is the right balance for a personalization cookie.
- *   domain:   derived from STORE_ORIGIN env (e.g. STORE_ORIGIN=https://example.com
- *             -> domain=.example.com) so the cookie is sent from the storefront
- *             (example.com) to the API (api.example.com) on credentialed cross-origin
- *             fetches (credentials:'include'). When STORE_ORIGIN is not set (dev/test)
- *             no domain attribute is set (localhost-scoped).
+ *   domain:   derived via PSL (eTLD+1) from STORE_ORIGIN, or from GUEST_COOKIE_DOMAIN when
+ *             set explicitly. On shared/public-suffix hosts (*.herokuapp.com, bare PSL entry)
+ *             or IPs/localhost, Domain is omitted (host-only cookie). See resolveGuestCookieDomain.
  *   maxAge:   1 year (personalization cookie -- low sensitivity, long horizon acceptable)
  *   path:     / (all store routes need it; not scoped to /store/v1 because Caddy may
  *             rewrite paths)
@@ -34,11 +32,15 @@
  * both and rejects a token whose tenantId does not match the current request's tenant. A
  * guest from tenant A can never be resolved as a guest on tenant B.
  *
- * NO PII: the token payload contains only a random UUID (guestId) and tenantId. No email,
- * no IP, no device fingerprint is ever stored in the token.
+ * NO PII: the token payload contains only a random UUID (guestId), tenantId, and issued-at
+ * timestamp. No email, no IP, no device fingerprint is ever stored in the token.
  */
-import { createHmac, randomUUID } from 'node:crypto';
-import { resolveStorageSigningSecret } from '../../storage/storage-signing-secret';
+import { createHmac, randomUUID, timingSafeEqual as nodeCryptoTimingSafeEqual } from 'node:crypto';
+import { parse as parseTld } from 'tldts';
+import {
+  resolveStorageSigningSecret,
+  STORAGE_SIGNING_SECRET_DEV_DEFAULT,
+} from '../../storage/storage-signing-secret';
 
 /** Cookie name. Must not collide with any existing cookie. */
 export const GUEST_COOKIE_NAME = 'sov_guest';
@@ -50,6 +52,8 @@ export const GUEST_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 interface GuestTokenPayload {
   guestId: string;
   tenantId: string;
+  /** Issued-at timestamp (milliseconds since epoch). Used for expiry validation. */
+  iat: number;
 }
 
 /**
@@ -57,11 +61,24 @@ interface GuestTokenPayload {
  * GUEST_TOKEN_SECRET when set (allows key rotation independent of storage), falls back to
  * STORAGE_SIGNING_SECRET. Both must meet the same 256-bit minimum in production (the boot
  * validator already enforces STORAGE_SIGNING_SECRET strength).
+ *
+ * GUEST_TOKEN_SECRET validation: rejects secrets shorter than 32 bytes, all-whitespace, or
+ * the storage dev default. A weak/invalid dedicated secret is NOT silently accepted — the
+ * fallback is used instead so an operator typo never silently degrades security.
  */
 function resolveGuestSigningSecret(): string {
   const dedicated = process.env['GUEST_TOKEN_SECRET'];
-  if (dedicated && dedicated.length >= 32) {
-    return dedicated;
+  if (dedicated !== undefined && dedicated !== '') {
+    // Apply the same strength checks as STORAGE_SIGNING_SECRET: min 32 bytes, not all-whitespace,
+    // not the well-known dev default.
+    const isWeak =
+      Buffer.byteLength(dedicated, 'utf8') < 32 ||
+      dedicated.trim().length === 0 ||
+      dedicated === STORAGE_SIGNING_SECRET_DEV_DEFAULT;
+    if (!isWeak) {
+      return dedicated;
+    }
+    // Weak dedicated secret: fall through to the validated fallback (never silently accept).
   }
   // Fallback: reuse the already-validated STORAGE_SIGNING_SECRET.
   return resolveStorageSigningSecret(process.env);
@@ -104,7 +121,11 @@ function verify(raw: string, expectedTenantId: string): GuestTokenPayload | null
   const expectedSig = createHmac('sha256', secret).update(payloadB64).digest('base64url');
 
   // Constant-time compare to prevent timing attacks on the HMAC.
-  if (!timingSafeEqual(receivedSig, expectedSig)) return null;
+  // HMAC-SHA256 base64url output is always 43 chars; length mismatch → reject without leaking.
+  const bufReceived = Buffer.from(receivedSig, 'utf8');
+  const bufExpected = Buffer.from(expectedSig, 'utf8');
+  if (bufReceived.length !== bufExpected.length) return null;
+  if (!nodeCryptoTimingSafeEqual(bufReceived, bufExpected)) return null;
 
   let payload: unknown;
   try {
@@ -113,11 +134,13 @@ function verify(raw: string, expectedTenantId: string): GuestTokenPayload | null
     return null;
   }
 
+  const rec = payload as Record<string, unknown>;
   if (
     typeof payload !== 'object' ||
     payload === null ||
-    typeof (payload as Record<string, unknown>).guestId !== 'string' ||
-    typeof (payload as Record<string, unknown>).tenantId !== 'string'
+    typeof rec.guestId !== 'string' ||
+    typeof rec.tenantId !== 'string' ||
+    typeof rec.iat !== 'number'
   ) {
     return null;
   }
@@ -130,68 +153,99 @@ function verify(raw: string, expectedTenantId: string): GuestTokenPayload | null
   // Validate guestId is a non-empty string (UUID format is not enforced -- opaque).
   if (p.guestId.length === 0 || p.guestId.length > 100) return null;
 
+  // TOKEN EXPIRY: reject tokens older than the max-age. Tokens without iat were rejected above.
+  if (Date.now() - p.iat > GUEST_COOKIE_MAX_AGE_MS) return null;
+
   return p;
 }
 
 /**
- * Constant-time string comparison (prevents timing attacks on signature comparison).
- * Uses Buffer.from to work with arbitrary-length base64url strings.
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  // Both must be equal length for a meaningful timing-safe compare. If lengths differ,
-  // do the compare on padded buffers so we don't short-circuit on length alone.
-  const bufA = Buffer.from(a, 'utf8');
-  const bufB = Buffer.from(b, 'utf8');
-  if (bufA.length !== bufB.length) {
-    // Still perform the compare to consume constant time on the longer; result is false.
-    const shorter = bufA.length < bufB.length ? bufA : bufB;
-    const longer = bufA.length < bufB.length ? bufB : bufA;
-    // XOR shorter against first bytes of longer -- result is irrelevant but runs the loop.
-    let acc = 0;
-    for (let i = 0; i < shorter.length; i++) {
-      acc |= shorter[i]! ^ longer[i]!;
-    }
-    void acc;
-    return false;
-  }
-  // Same length -- standard timing-safe path.
-  let diff = 0;
-  for (let i = 0; i < bufA.length; i++) {
-    diff |= bufA[i]! ^ bufB[i]!;
-  }
-  return diff === 0;
-}
-
-/**
- * Derive the cookie `domain` attribute from the STORE_ORIGIN env so the cookie is sent from
- * the storefront (e.g. example.com) to the API subdomain (e.g. api.example.com) via
- * credentials:'include'. Returns undefined when STORE_ORIGIN is not set (dev/test), which
- * means the browser uses the current request host (correct for localhost).
+ * Derive the cookie `domain` attribute for the `sov_guest` cookie.
  *
- * Example: STORE_ORIGIN=https://example.com -> ".example.com"
- *          STORE_ORIGIN=https://www.example.com -> ".example.com"
- *          STORE_ORIGIN=https://localhost -> undefined (no domain attr)
+ * Resolution order:
+ *   1. GUEST_COOKIE_DOMAIN env — if set, use verbatim (operator-controlled override, e.g. for
+ *      shared hosting where auto-detection cannot determine the correct scope).
+ *   2. STORE_ORIGIN env — parse the hostname and resolve the eTLD+1 (registrable domain) via the
+ *      Public Suffix List (tldts). Setting Domain=<eTLD+1> lets the cookie span the merchant's
+ *      own subdomains (storefront.example.com ↔ api.example.com) without leaking to unrelated
+ *      tenants on shared hosting (*.herokuapp.com, *.sovecom.cloud, etc.).
+ *   3. Fallback — return undefined (host-only cookie). The browser restricts the cookie to the
+ *      exact request host. Cross-subdomain guest identity then requires GUEST_COOKIE_DOMAIN.
+ *
+ * Cases that always return undefined (host-only):
+ *   - Localhost / loopback
+ *   - Bare IPv4 or IPv6 address
+ *   - The host itself IS a public suffix (e.g. "com", "co.uk") — setting Domain= to a PSL
+ *     entry would broadcast the cookie to every registrant under that suffix.
+ *   - tldts cannot determine a registrable domain (returns null/empty).
+ *
+ * Examples (STORE_ORIGIN path, no GUEST_COOKIE_DOMAIN override):
+ *   https://example.com        → example.com   (merchant owns eTLD+1)
+ *   https://shop.example.com   → example.com   (eTLD+1, covers api.example.com too)
+ *   https://tenant.sovecom.cloud → undefined   (sovecom.cloud is a PSL public suffix entry;
+ *                                               use GUEST_COOKIE_DOMAIN=tenant.sovecom.cloud)
+ *   https://myapp.herokuapp.com → undefined    (shared suffix; host-only is the safe default)
+ *   https://localhost           → undefined    (localhost)
+ *   https://192.168.1.1         → undefined    (IP)
  */
 export function resolveGuestCookieDomain(): string | undefined {
+  // 1. Operator-controlled explicit override — still validated through the PSL so a typo
+  //    (e.g. ".cloud", "co.uk", "herokuapp.com") can't silently over-scope the cookie across
+  //    a whole public/shared suffix. An invalid override falls through to auto-derivation.
+  const override = process.env['GUEST_COOKIE_DOMAIN'];
+  if (override && override.trim().length > 0) {
+    const cand = override.trim().replace(/^\./, '').toLowerCase();
+    const p = parseTld(cand, { allowPrivateDomains: true });
+    const isRegistrable =
+      cand.includes('.') &&
+      !!p.domain &&
+      !p.isPrivate && // reject private/shared suffixes (herokuapp.com, vercel.app, …)
+      (cand === p.domain || cand.endsWith(`.${p.domain}`)); // the registrable domain or a subdomain of it
+    if (isRegistrable) return cand;
+    // else: ignore the footgun value and fall through to STORE_ORIGIN-based derivation.
+  }
+
+  // 2. Derive from STORE_ORIGIN via PSL.
   const origin = process.env['STORE_ORIGIN'];
   if (!origin) return undefined;
+
+  let host: string;
   try {
-    const url = new URL(origin);
-    const host = url.hostname;
-    // Do not set a domain for localhost or bare IP addresses -- those must not have a domain attr.
-    if (host === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return undefined;
-    // Strip leading www. to get the registrable domain, then prefix with dot to cover subdomains.
-    const stripped = host.replace(/^www\./, '');
-    return `.${stripped}`;
+    host = new URL(origin).hostname;
   } catch {
     return undefined;
   }
+
+  // Reject localhost and bare IPv4/IPv6 immediately.
+  if (host === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith('[')) {
+    return undefined;
+  }
+
+  // Parse with allowPrivateDomains: true so shared-hosting domains (herokuapp.com, vercel.app,
+  // netlify.app, etc.) are flagged as `isPrivate: true` rather than resolving to the shared
+  // eTLD+1. Without this flag, tldts treats *.herokuapp.com as ICANN and returns 'herokuapp.com'
+  // as the registrable domain (which would leak the cookie across all Heroku tenants).
+  const parsed = parseTld(host, { allowPrivateDomains: true });
+
+  // No registrable domain could be determined (IP, bare TLD, undeterminable).
+  if (!parsed.domain) return undefined;
+
+  // Host is on a shared/private-PSL suffix (*.herokuapp.com, *.vercel.app, etc.).
+  // Setting Domain= to the registrable domain would scope the cookie across all tenants
+  // on that shared infrastructure. Return undefined (host-only); operators must set
+  // GUEST_COOKIE_DOMAIN explicitly for cross-subdomain identity on shared hosting.
+  if (parsed.isPrivate) return undefined;
+
+  // Sanity: domain must contain at least one dot (already guaranteed by PSL, but be explicit).
+  if (!parsed.domain.includes('.')) return undefined;
+
+  return parsed.domain;
 }
 
 /** Mint a fresh signed guest token for a new anonymous visitor. */
 export function mintGuestToken(tenantId: string): string {
   const guestId = randomUUID();
-  return encode({ guestId, tenantId });
+  return encode({ guestId, tenantId, iat: Date.now() });
 }
 
 /**

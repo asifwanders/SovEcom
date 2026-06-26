@@ -32,6 +32,13 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
+/**
+ * Maximum recently-viewed rows kept per viewer. After upserting a view, any rows beyond this
+ * cap (oldest by viewed_at) are pruned in the same operation. This bounds table growth even
+ * when anonymous bots rotate through many product IDs after receiving a guest cookie.
+ */
+const MAX_ROWS_PER_VIEWER = 100;
+
 export class RecentlyViewedRepository {
   constructor(private readonly tables: TablesClient) {}
 
@@ -40,6 +47,9 @@ export class RecentlyViewedRepository {
    * UNIQUE(viewer_key, product_id) constraint + `ON CONFLICT … DO UPDATE SET viewed_at = now()`
    * means a re-view of the same product never creates a second row — it just moves the existing row
    * to the top of the newest-first read. Returns the upserted row (always present via RETURNING).
+   *
+   * ROW CAP: after the upsert, rows beyond MAX_ROWS_PER_VIEWER (oldest first) are deleted in
+   * the same db round-trip, preventing unbounded table growth from rotating guest bots.
    */
   async recordView(viewerKey: string, productId: string): Promise<ViewRow> {
     const { rows } = await this.tables.exec(
@@ -55,6 +65,20 @@ export class RecentlyViewedRepository {
       // An upsert with RETURNING always yields the row; this guards the type without a non-null !.
       throw new Error('recently-viewed: row vanished immediately after upsert');
     }
+
+    // Prune oldest rows beyond cap, keyed strictly on this viewer.
+    await this.tables.exec(
+      `DELETE FROM ${TABLE}
+       WHERE viewer_key = $1
+         AND id NOT IN (
+           SELECT id FROM ${TABLE}
+            WHERE viewer_key = $1
+            ORDER BY viewed_at DESC, id DESC
+            LIMIT $2
+         )`,
+      [viewerKey, MAX_ROWS_PER_VIEWER],
+    );
+
     return row;
   }
 

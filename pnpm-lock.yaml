@@ -216,6 +216,9 @@ importers:
       tar:
         specifier: ^7.5.16
         version: 7.5.16
+      tldts:
+        specifier: ^7.4.4
+        version: 7.4.4
       uuidv7:
         specifier: ^1.2.1
         version: 1.2.1
@@ -8381,11 +8384,18 @@ packages:
   tldts-core@7.4.2:
     resolution: {integrity: sha512-nwEyF4vl4RSJjwSjBUmOSxc3BFPoIFdlRthJ6e+5v9P3bHNsoD06UjuqMUspqp7vsEZ1beaHi1km+optiE17yA==}
 
+  tldts-core@7.4.4:
+    resolution: {integrity: sha512-vwVLJVvvpslm7vqAH7+XNj/neA/Ynq7DT2EEcMuwc5YzN5XaMyRAqxwU+uX3azZ1FQtB2gvrvnLnAEkvYlVdfg==}
+
   tldts-icann@6.1.86:
     resolution: {integrity: sha512-NFxmRT2lAEMcCOBgeZ0NuM0zsK/xgmNajnY6n4S1mwAKocft2s2ise1O3nQxrH3c+uY6hgHUV9GGNVp7tUE4Sg==}
 
   tldts@7.4.2:
     resolution: {integrity: sha512-kCwffuaH8ntKtygnWe1b4BJKWiCUH30n5KfoTr6IchcXOwR7chAOFJxFrH3vjANafUYrIA4a7SDL+nn7SiR4Sw==}
+    hasBin: true
+
+  tldts@7.4.4:
+    resolution: {integrity: sha512-kFXFK7O4WPextIUAOk8qtnw9dxR9UIXP9CjuH1cTBVBZMDeQcUPgr/IazGiw1B0Yiw5L75gHLWeW4iD793r90g==}
     hasBin: true
 
   tmp@0.0.33:
@@ -18157,6 +18167,8 @@ snapshots:
 
   tldts-core@7.4.2: {}
 
+  tldts-core@7.4.4: {}
+
   tldts-icann@6.1.86:
     dependencies:
       tldts-core: 6.1.86
@@ -18164,6 +18176,10 @@ snapshots:
   tldts@7.4.2:
     dependencies:
       tldts-core: 7.4.2
+
+  tldts@7.4.4:
+    dependencies:
+      tldts-core: 7.4.4
 
   tmp@0.0.33:
     dependencies:

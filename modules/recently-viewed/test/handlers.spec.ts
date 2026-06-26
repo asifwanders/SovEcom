@@ -383,6 +383,69 @@ describe('recently-viewed handlers — merge-guest (POST /merge-guest)', () => {
   });
 });
 
+describe('recently-viewed repository — row-cap (MAX_ROWS_PER_VIEWER)', () => {
+  it('recordView prunes oldest rows beyond the cap for the same viewer', async () => {
+    const tables = new FakeTables();
+    const repo = new RecentlyViewedRepository(tables);
+    const viewerKey = `${GUEST_KEY_PREFIX}cap-test-guest`;
+
+    // Insert MAX_ROWS_PER_VIEWER + 5 distinct products for the same viewer.
+    // We access the cap value indirectly: insert 105 rows and confirm only 100 remain.
+    const OVER_CAP = 105;
+    for (let i = 0; i < OVER_CAP; i++) {
+      await repo.recordView(viewerKey, `product-${i}`);
+    }
+
+    const viewerRows = tables.views.filter((r) => r.viewer_key === viewerKey);
+    expect(viewerRows.length).toBeLessThanOrEqual(100);
+  });
+
+  it('recordView does NOT prune rows for a DIFFERENT viewer', async () => {
+    const tables = new FakeTables();
+    const repo = new RecentlyViewedRepository(tables);
+    const viewerA = `${GUEST_KEY_PREFIX}viewer-a`;
+    const viewerB = `${GUEST_KEY_PREFIX}viewer-b`;
+
+    // Seed viewer B with 5 rows.
+    for (let i = 0; i < 5; i++) {
+      await repo.recordView(viewerB, `b-prod-${i}`);
+    }
+    const bRowsBefore = tables.views.filter((r) => r.viewer_key === viewerB).length;
+
+    // Now exceed the cap for viewer A.
+    for (let i = 0; i < 105; i++) {
+      await repo.recordView(viewerA, `a-prod-${i}`);
+    }
+
+    // Viewer B's rows must be untouched.
+    const bRowsAfter = tables.views.filter((r) => r.viewer_key === viewerB).length;
+    expect(bRowsAfter).toBe(bRowsBefore);
+  });
+
+  it('recordView keeps newest rows when pruning', async () => {
+    const tables = new FakeTables();
+    const repo = new RecentlyViewedRepository(tables);
+    const viewerKey = `${GUEST_KEY_PREFIX}cap-order-guest`;
+
+    // Insert 105 products; the last 100 inserted should be the ones kept (newest viewed_at).
+    for (let i = 0; i < 105; i++) {
+      await repo.recordView(viewerKey, `product-${i}`);
+    }
+
+    const keptIds = new Set(
+      tables.views.filter((r) => r.viewer_key === viewerKey).map((r) => r.product_id),
+    );
+    // The first 5 (oldest) should have been pruned.
+    for (let i = 0; i < 5; i++) {
+      expect(keptIds.has(`product-${i}`)).toBe(false);
+    }
+    // The last 100 should be retained.
+    for (let i = 5; i < 105; i++) {
+      expect(keptIds.has(`product-${i}`)).toBe(true);
+    }
+  });
+});
+
 describe('recently-viewed handlers — routing', () => {
   it('a disabled module → 404 on every route', async () => {
     const { deps } = makeDeps({ settings: { enabled: false } });
