@@ -24,6 +24,8 @@ COPY packages/ ./packages/
 COPY apps/admin/ ./apps/admin/
 COPY brand/ ./brand/
 
+RUN pnpm --filter @sovecom/module-sdk build
+RUN pnpm --filter @sovecom/theme-sdk build
 RUN pnpm --filter @sovecom/client-js build
 
 ARG VITE_API_BASE_URL=http://localhost:3000
@@ -36,5 +38,10 @@ FROM caddy:2-alpine AS production
 
 COPY --from=builder /app/apps/admin/dist /srv
 COPY docker/spa.Caddyfile /etc/caddy/Caddyfile
+COPY docker/entrypoint-spa.sh /entrypoint-spa.sh
 
 EXPOSE 80
+
+# API_BASE_URL is injected at container start (not build time).
+# Example: docker run -e API_BASE_URL=https://api.mystore.com <image>
+ENTRYPOINT ["/entrypoint-spa.sh"]

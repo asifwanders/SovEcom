@@ -21,9 +21,16 @@ export const CART_COOKIE = 'sov_cart';
 /** Default API origin when `NEXT_PUBLIC_API_BASE_URL` is unset — mirrors the old `lib/api.ts`. */
 const DEFAULT_API_BASE_URL = 'http://localhost:3000';
 
-/** Resolve the API origin from the public env, falling back to localhost for local dev. */
+/**
+ * Resolve the API origin for server-side fetches. Precedence:
+ *   1. process.env.API_BASE_URL — runtime env, set per container; wins over the baked build arg.
+ *      In compose this is the internal network address (e.g. http://api:3000) for SSR, while the
+ *      browser uses the public origin injected via window.__SOVECOM__ from the same env var.
+ *   2. process.env.NEXT_PUBLIC_API_BASE_URL — build-time fallback; keeps `next dev` working.
+ *   3. DEFAULT_API_BASE_URL (localhost:3000) — local dev with no env at all.
+ */
 export function getApiBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_API_BASE_URL;
+  return process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL;
 }
 
 /**

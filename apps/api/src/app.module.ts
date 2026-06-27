@@ -28,6 +28,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 import { SetupModule } from './setup/setup.module';
 import { ModulesModule } from './modules/modules.module';
 import { ThemesModule } from './modules/themes.module';
+import { StorefrontModule } from './modules/storefront.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { SlotsModule } from './modules/slots.module';
 
@@ -97,6 +98,10 @@ import { SlotsModule } from './modules/slots.module';
     // theme endpoint. Reuses the SHARED hardened tarball extractor (same guards as modules).
     // NO theme code runs (themes are declarative assets). After ModulesModule.
     ThemesModule,
+    // admin home-sections CRUD + public store home-sections endpoint.
+    // Singleton `sections` JSONB per tenant; validated by the theme-sdk on every write.
+    // After ThemesModule (themes:read/write gates are reused for RBAC).
+    StorefrontModule,
     // the slot registry — DERIVES the slot → component map
     // from ENABLED modules' declared targets + admin conflict resolutions (admin
     // chooses, no silent override). Admin (resolved + conflicts + pick a winner) + public store

@@ -8,15 +8,14 @@
  *
  * Trust boundary recap:
  *   - The VIEWER identity comes from {@link resolveViewer}: the CORE-VERIFIED `req.customer.id` for a
- *     logged-in shopper (the 3.10-i.5 bridge), else a HIGH-ENTROPY storefront-supplied guest token
- *     (header `x-rv-guest` / `?guest=`). The module never manages storefront cookies — minting that
- *     guest cookie is the storefront's job, deferred to 3.20 (see README "Guest identity"). A short /
- *     missing token yields no viewer, so one guest can never read another's history by a guessable id.
+ *     logged-in shopper, else the CORE-DERIVED `req.guestId.id` from the signed sov_guest httpOnly
+ *     cookie. Neither is ever read from client input. When a guest logs in, `POST /merge-guest`
+ *     migrates the guest's history to the customer key space.
  *   - Storage is the module's OWN `mod_recently-viewed_views` table via parameterized `sdk.tables`
  *     SQL, run under the module's low-privilege DB role — it can never touch a core table. Every
  *     read/write binds `viewer_key`, so per-viewer isolation is enforced in SQL.
  *   - The catalog read (`read:products`) ENRICHES the list (title/slug/status) and now carries the
- *     product's PRIMARY category (`ModuleProductDto.category`, B1) — still no price. `excludeCategories`
+ *     product's PRIMARY category (`ModuleProductDto.category`) — still no price. `excludeCategories`
  *     is applied behind a documented resolver SEAM wired to that catalog read (see README "Category
  *     exclusion"). No email, no orders, no events: the module declares none of them.
  *   - There is NO admin surface — the feature is entirely store-facing.
@@ -71,13 +70,7 @@ export {
   RECENTLY_VIEWED_SLOT,
   CAROUSEL_MAX_ITEMS,
 } from './slot/recently-viewed-slot';
-export {
-  resolveViewer,
-  MIN_GUEST_TOKEN_LEN,
-  MAX_GUEST_TOKEN_LEN,
-  CUSTOMER_KEY_PREFIX,
-  GUEST_KEY_PREFIX,
-} from './identity/viewer';
+export { resolveViewer, CUSTOMER_KEY_PREFIX, GUEST_KEY_PREFIX } from './identity/viewer';
 export type { Viewer } from './identity/viewer';
 export {
   isExcludedByCategory,

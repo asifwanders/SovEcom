@@ -3,7 +3,7 @@
  *
  * `GET /slot?slot=home-page-bottom&route=/` returns a `product-carousel` widget descriptor of the
  * visitor's recently-viewed products — data only. The visitor is resolved by the module's existing
- * identity seam (core-verified `req.customer.id`, else the `x-rv-guest` token):
+ * identity seam (core-verified `req.customer.id`, else the core-derived `req.guestId.id`):
  *   - a customer / guest with history → a carousel descriptor of their enriched products;
  *   - the descriptor is VISITOR-SCOPED (visitor A never sees visitor B's history);
  *   - no resolvable visitor OR no items → 204 (decline; the storefront renders nothing);
@@ -21,7 +21,7 @@ import { resolveSettings, type RecentlyViewedSettings } from '../src/settings';
 import { CAROUSEL_MAX_ITEMS } from '../src/slot/recently-viewed-slot';
 import { FakeTables, FakeStore, FakeCategoryResolver } from './_mock-sdk';
 
-const GUEST = 'guest-token-abcdef0123456789';
+const GUEST_ID = { id: 'guest-uuid-slot-test' };
 
 function makeDeps(
   overrides: { settings?: Partial<RecentlyViewedSettings>; store?: FakeStore } = {},
@@ -44,7 +44,8 @@ function slotReq(partial: Partial<ModuleHttpRequest> = {}): ModuleHttpRequest {
     method: 'GET',
     path: '/slot',
     query: { slot: 'home-page-bottom', route: '/' },
-    headers: { 'x-rv-guest': GUEST },
+    headers: {},
+    guestId: GUEST_ID,
     ...partial,
   };
 }
@@ -78,7 +79,7 @@ function seedViews(tables: FakeTables, viewerKey: string, productIds: string[]):
 describe('recently-viewed slot — GET /slot (product-carousel descriptor)', () => {
   it('returns a product-carousel descriptor of the GUEST visitor enriched history', async () => {
     const { deps, tables } = makeDeps();
-    seedViews(tables, `guest:${GUEST}`, ['p1', 'p2']);
+    seedViews(tables, `guest:${GUEST_ID.id}`, ['p1', 'p2']);
     const res = await handleRequest(slotReq(), deps);
     expect(res.status).toBe(200);
     expect(res.headers?.['content-type']).toContain('application/json');
@@ -95,13 +96,11 @@ describe('recently-viewed slot — GET /slot (product-carousel descriptor)', () 
     }
   });
 
-  it('is VISITOR-SCOPED: a different guest token sees its OWN (empty) history → 204', async () => {
+  it('is VISITOR-SCOPED: a different guest sees its OWN (empty) history → 204', async () => {
     const { deps, tables } = makeDeps();
-    seedViews(tables, `guest:${GUEST}`, ['p1', 'p2']);
-    const res = await handleRequest(
-      slotReq({ headers: { 'x-rv-guest': 'other-guest-token-9999999' } }),
-      deps,
-    );
+    seedViews(tables, `guest:${GUEST_ID.id}`, ['p1', 'p2']);
+    // A different guestId sees nothing — isolation holds.
+    const res = await handleRequest(slotReq({ guestId: { id: 'other-guest-uuid-xyz' } }), deps);
     expect(res.status).toBe(204);
   });
 
@@ -114,10 +113,11 @@ describe('recently-viewed slot — GET /slot (product-carousel descriptor)', () 
     expect(d.props.items.map((i) => i.productId)).toEqual(['c1']);
   });
 
-  it('204 when no visitor can be resolved (no customer, no guest token)', async () => {
+  it('204 when no visitor can be resolved (no customer, no guestId)', async () => {
     const { deps, tables } = makeDeps();
-    seedViews(tables, `guest:${GUEST}`, ['p1']);
-    const res = await handleRequest(slotReq({ headers: {} }), deps);
+    seedViews(tables, `guest:${GUEST_ID.id}`, ['p1']);
+    // Override guestId to undefined — no identity → decline.
+    const res = await handleRequest(slotReq({ guestId: undefined }), deps);
     expect(res.status).toBe(204);
   });
 
@@ -129,7 +129,7 @@ describe('recently-viewed slot — GET /slot (product-carousel descriptor)', () 
 
   it('204 when the slot query param is unknown (declines to render)', async () => {
     const { deps, tables } = makeDeps();
-    seedViews(tables, `guest:${GUEST}`, ['p1']);
+    seedViews(tables, `guest:${GUEST_ID.id}`, ['p1']);
     const res = await handleRequest(slotReq({ query: { slot: 'other', route: '/' } }), deps);
     expect(res.status).toBe(204);
   });
@@ -137,7 +137,7 @@ describe('recently-viewed slot — GET /slot (product-carousel descriptor)', () 
   it('omits products that no longer enrich (deleted/unpublished) rather than emitting a bad card', async () => {
     const store = new FakeStore(new Set(['p1'])); // only p1 exists
     const { deps, tables } = makeDeps({ store });
-    seedViews(tables, `guest:${GUEST}`, ['p1', 'p2']);
+    seedViews(tables, `guest:${GUEST_ID.id}`, ['p1', 'p2']);
     const d = descriptor(await handleRequest(slotReq(), deps));
     expect(d.props.items.map((i) => i.productId)).toEqual(['p1']);
   });
@@ -146,7 +146,7 @@ describe('recently-viewed slot — GET /slot (product-carousel descriptor)', () 
     const { deps, tables } = makeDeps({ settings: { maxItems: 50 } });
     seedViews(
       tables,
-      `guest:${GUEST}`,
+      `guest:${GUEST_ID.id}`,
       Array.from({ length: 40 }, (_, i) => `p${i}`),
     );
     const d = descriptor(await handleRequest(slotReq(), deps));
@@ -156,7 +156,7 @@ describe('recently-viewed slot — GET /slot (product-carousel descriptor)', () 
 
   it('declines to render when the module is disabled (non-200)', async () => {
     const { deps, tables } = makeDeps({ settings: { enabled: false } });
-    seedViews(tables, `guest:${GUEST}`, ['p1']);
+    seedViews(tables, `guest:${GUEST_ID.id}`, ['p1']);
     const res = await handleRequest(slotReq(), deps);
     expect(res.status).not.toBe(200);
   });

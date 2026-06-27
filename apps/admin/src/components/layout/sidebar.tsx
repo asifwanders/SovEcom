@@ -1,8 +1,11 @@
-import { Link, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useT } from '@/lib/i18n-context';
 import { useAuthStore } from '@/lib/auth';
 import { can, type Permission } from '@/lib/permissions';
+import { useGroupState } from '@/hooks/use-group-state';
+import { NavGroup } from './nav-group';
 import {
   LayoutDashboard,
   Package,
@@ -23,10 +26,12 @@ import {
   Webhook,
   Palette,
   LayoutGrid,
+  LayoutTemplate,
   Boxes,
   BarChart3,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
 } from 'lucide-react';
 import { SovEcomLogo } from '@/components/icons';
 
@@ -34,119 +39,173 @@ import { SovEcomLogo } from '@/components/icons';
 // switch. Typed as the exact `t` returned by useT.
 type ReactiveT = ReturnType<typeof useT>['t'];
 
-const allNavItems: {
+interface NavItemDef {
   to: string;
   label: (t: ReactiveT) => string;
   icon: typeof LayoutDashboard;
   permission: Permission | null;
+}
+
+/** All group definitions. Order and membership match the spec. */
+const GROUP_DEFS: {
+  id: string;
+  groupLabel: (t: ReactiveT) => string;
+  items: NavItemDef[];
 }[] = [
   {
-    to: '/dashboard',
-    label: (t) => t('layout', 'dashboard'),
-    icon: LayoutDashboard,
-    permission: null,
-  },
-  { to: '/products', label: (t) => t('layout', 'products'), icon: Package, permission: null },
-  {
-    to: '/categories',
-    label: (t) => t('layout', 'categories'),
-    icon: FolderTree,
-    permission: null,
-  },
-  { to: '/tags', label: (t) => t('layout', 'tags'), icon: Tags, permission: null },
-  {
-    to: '/pages',
-    label: (t) => t('layout', 'pages'),
-    icon: FileText,
-    permission: 'pages:read',
+    id: 'overview',
+    groupLabel: (t) => t('layout', 'groupOverview'),
+    items: [
+      {
+        to: '/dashboard',
+        label: (t) => t('layout', 'dashboard'),
+        icon: LayoutDashboard,
+        permission: null,
+      },
+    ],
   },
   {
-    to: '/orders',
-    label: (t) => t('layout', 'orders'),
-    icon: ShoppingCart,
-    permission: 'orders:read',
+    id: 'catalog',
+    groupLabel: (t) => t('layout', 'groupCatalog'),
+    items: [
+      { to: '/products', label: (t) => t('layout', 'products'), icon: Package, permission: null },
+      {
+        to: '/categories',
+        label: (t) => t('layout', 'categories'),
+        icon: FolderTree,
+        permission: null,
+      },
+      { to: '/tags', label: (t) => t('layout', 'tags'), icon: Tags, permission: null },
+      {
+        to: '/pages',
+        label: (t) => t('layout', 'pages'),
+        icon: FileText,
+        permission: 'pages:read',
+      },
+    ],
   },
   {
-    to: '/returns',
-    label: (t) => t('layout', 'returns'),
-    icon: RotateCcw,
-    permission: 'orders:read',
+    id: 'orders',
+    groupLabel: (t) => t('layout', 'groupOrders'),
+    items: [
+      {
+        to: '/orders',
+        label: (t) => t('layout', 'orders'),
+        icon: ShoppingCart,
+        permission: 'orders:read',
+      },
+      {
+        to: '/returns',
+        label: (t) => t('layout', 'returns'),
+        icon: RotateCcw,
+        permission: 'orders:read',
+      },
+      {
+        to: '/disputes',
+        label: (t) => t('layout', 'disputes'),
+        icon: Gavel,
+        permission: 'orders:read',
+      },
+    ],
   },
   {
-    to: '/email-log',
-    label: (t) => t('layout', 'emailLog'),
-    icon: Mail,
-    permission: 'orders:read',
+    id: 'customers',
+    groupLabel: (t) => t('layout', 'groupCustomers'),
+    items: [
+      { to: '/customers', label: (t) => t('layout', 'customers'), icon: Users, permission: null },
+    ],
   },
   {
-    to: '/disputes',
-    label: (t) => t('layout', 'disputes'),
-    icon: Gavel,
-    permission: 'orders:read',
+    id: 'marketing',
+    groupLabel: (t) => t('layout', 'groupMarketing'),
+    items: [
+      {
+        to: '/discounts',
+        label: (t) => t('layout', 'discounts'),
+        icon: Ticket,
+        permission: 'settings:read',
+      },
+      {
+        to: '/analytics',
+        label: (t) => t('layout', 'analytics'),
+        icon: BarChart3,
+        permission: 'settings:read',
+      },
+    ],
   },
   {
-    to: '/discounts',
-    label: (t) => t('layout', 'discounts'),
-    icon: Ticket,
-    permission: 'settings:read',
+    id: 'storefront',
+    groupLabel: (t) => t('layout', 'groupStorefront'),
+    items: [
+      {
+        to: '/themes',
+        label: (t) => t('layout', 'themes'),
+        icon: Palette,
+        permission: 'themes:read',
+      },
+      {
+        to: '/home-sections',
+        label: (t) => t('layout', 'homeSections'),
+        icon: LayoutTemplate,
+        permission: 'themes:write',
+      },
+      {
+        to: '/slots',
+        label: (t) => t('layout', 'slots'),
+        icon: LayoutGrid,
+        permission: 'themes:read',
+      },
+      {
+        to: '/modules',
+        label: (t) => t('layout', 'modules'),
+        icon: Boxes,
+        permission: 'modules:read',
+      },
+    ],
   },
   {
-    to: '/shipping',
-    label: (t) => t('layout', 'shipping'),
-    icon: Truck,
-    permission: 'settings:read',
+    id: 'settings',
+    groupLabel: (t) => t('layout', 'groupSettings'),
+    items: [
+      {
+        to: '/shipping',
+        label: (t) => t('layout', 'shipping'),
+        icon: Truck,
+        permission: 'settings:read',
+      },
+      {
+        to: '/taxes',
+        label: (t) => t('layout', 'taxes'),
+        icon: Percent,
+        permission: 'settings:read',
+      },
+      {
+        to: '/webhooks',
+        label: (t) => t('layout', 'webhooks'),
+        icon: Webhook,
+        permission: 'settings:read',
+      },
+      {
+        to: '/email-log',
+        label: (t) => t('layout', 'emailLog'),
+        icon: Mail,
+        permission: 'orders:read',
+      },
+      {
+        to: '/business-identity',
+        label: (t) => t('layout', 'businessIdentity'),
+        icon: Building2,
+        permission: 'settings:write',
+      },
+      {
+        to: '/audit-log',
+        label: (t) => t('layout', 'auditLog'),
+        icon: ClipboardList,
+        permission: 'audit_log:export',
+      },
+      { to: '/settings', label: (t) => t('layout', 'settings'), icon: Settings, permission: null },
+    ],
   },
-  {
-    to: '/taxes',
-    label: (t) => t('layout', 'taxes'),
-    icon: Percent,
-    permission: 'settings:read',
-  },
-  {
-    to: '/webhooks',
-    label: (t) => t('layout', 'webhooks'),
-    icon: Webhook,
-    permission: 'settings:read',
-  },
-  {
-    to: '/themes',
-    label: (t) => t('layout', 'themes'),
-    icon: Palette,
-    permission: 'themes:read',
-  },
-  {
-    to: '/slots',
-    label: (t) => t('layout', 'slots'),
-    icon: LayoutGrid,
-    permission: 'themes:read',
-  },
-  {
-    to: '/modules',
-    label: (t) => t('layout', 'modules'),
-    icon: Boxes,
-    permission: 'modules:read',
-  },
-  {
-    to: '/analytics',
-    label: (t) => t('layout', 'analytics'),
-    icon: BarChart3,
-    permission: 'settings:read',
-  },
-  { to: '/customers', label: (t) => t('layout', 'customers'), icon: Users, permission: null },
-  // Audit log is only shown to owner/admin (audit_log:export gating is sufficient)
-  {
-    to: '/audit-log',
-    label: (t) => t('layout', 'auditLog'),
-    icon: ClipboardList,
-    permission: 'audit_log:export',
-  },
-  {
-    to: '/business-identity',
-    label: (t) => t('layout', 'businessIdentity'),
-    icon: Building2,
-    permission: 'settings:write',
-  },
-  { to: '/settings', label: (t) => t('layout', 'settings'), icon: Settings, permission: null },
 ];
 
 interface SidebarProps {
@@ -160,10 +219,31 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: Side
   const location = useLocation();
   const { t } = useT();
   const role = useAuthStore((s) => s.user?.role ?? null);
-  // UX-only: filter nav items by client-side permission. Server enforces real authz.
-  const navItems = allNavItems.filter(
-    (item) => item.permission === null || can(role, item.permission),
-  );
+
+  // Filter groups: drop items the user cannot see, drop empty groups.
+  const visibleGroups = GROUP_DEFS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => item.permission === null || can(role, item.permission)),
+  })).filter((group) => group.items.length > 0);
+
+  const allGroupIds = visibleGroups.map((g) => g.id);
+
+  // Find which group contains the active route so we can auto-expand it.
+  const activeGroupId = visibleGroups.find((g) =>
+    g.items.some((item) => location.pathname.startsWith(item.to)),
+  )?.id;
+
+  const { openGroups, toggle, setOpen, expandAll, collapseAll } = useGroupState(allGroupIds);
+
+  // Auto-expand the group containing the active route when it changes.
+  useEffect(() => {
+    if (activeGroupId && !openGroups.has(activeGroupId)) {
+      setOpen(activeGroupId, true);
+    }
+    // We only want to react to route changes, not openGroups changes.
+  }, [activeGroupId, setOpen]);
+
+  const allOpen = allGroupIds.every((id) => openGroups.has(id));
 
   return (
     <>
@@ -195,30 +275,50 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: Side
           </div>
         </div>
 
+        {/* Expand all / Collapse all — only when sidebar is not icon-rail */}
+        {!collapsed && (
+          <div className="flex justify-end px-3 pt-2 pb-0.5">
+            <button
+              type="button"
+              onClick={() => (allOpen ? collapseAll() : expandAll(allGroupIds))}
+              className={cn(
+                'flex items-center gap-1 text-xs text-muted-foreground/60 hover:text-muted-foreground',
+                'rounded px-1.5 py-0.5 transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              )}
+              title={allOpen ? t('layout', 'collapseAll') : t('layout', 'expandAll')}
+            >
+              <ChevronsUpDown className="h-3 w-3" aria-hidden="true" />
+              <span>{allOpen ? t('layout', 'collapseAll') : t('layout', 'expandAll')}</span>
+            </button>
+          </div>
+        )}
+
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
-          {navItems.map((item) => {
-            const active = location.pathname.startsWith(item.to);
-            const Icon = item.icon;
+        <nav className="flex-1 overflow-y-auto py-2 px-2 space-y-0" aria-label="Main navigation">
+          {visibleGroups.map((group) => {
+            const isOpen = openGroups.has(group.id);
+            const hasActive = group.items.some((item) => location.pathname.startsWith(item.to));
+
+            const resolvedItems = group.items.map((item) => ({
+              to: item.to,
+              label: item.label(t),
+              Icon: item.icon,
+              active: location.pathname.startsWith(item.to),
+            }));
+
             return (
-              <Link
-                key={item.to}
-                to={item.to}
-                onClick={onMobileClose}
-                className={cn(
-                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  active
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                  collapsed && 'justify-center',
-                )}
-                aria-current={active ? 'page' : undefined}
-                title={collapsed ? item.label(t) : undefined}
-              >
-                <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-                {!collapsed && <span className="truncate">{item.label(t)}</span>}
-              </Link>
+              <NavGroup
+                key={group.id}
+                id={group.id}
+                label={group.groupLabel(t)}
+                items={resolvedItems}
+                isOpen={isOpen}
+                sidebarCollapsed={collapsed}
+                hasActive={hasActive}
+                onToggle={() => toggle(group.id)}
+                onItemClick={onMobileClose}
+              />
             );
           })}
         </nav>

@@ -29,6 +29,7 @@ import ShippingPage from '@/routes/shipping';
 import TaxesPage from '@/routes/taxes';
 import WebhooksPage from '@/routes/webhooks';
 import ThemesPage from '@/routes/themes';
+import HomeSectionsPage from '@/routes/home-sections';
 import SlotsPage from '@/routes/slots';
 import ModulesPage from '@/routes/modules';
 import AnalyticsPage from '@/routes/analytics';
@@ -128,6 +129,7 @@ function App() {
               <Route path="/taxes" element={<TaxesPage />} />
               <Route path="/webhooks" element={<WebhooksPage />} />
               <Route path="/themes" element={<ThemesPage />} />
+              <Route path="/home-sections" element={<HomeSectionsPage />} />
               <Route path="/slots" element={<SlotsPage />} />
               <Route path="/modules" element={<ModulesPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />

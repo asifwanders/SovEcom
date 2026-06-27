@@ -24,6 +24,8 @@ COPY packages/ ./packages/
 COPY apps/storefront-next/ ./apps/storefront-next/
 COPY brand/ ./brand/
 
+RUN pnpm --filter @sovecom/module-sdk build
+RUN pnpm --filter @sovecom/theme-sdk build
 RUN pnpm --filter @sovecom/client-js build
 
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
@@ -49,4 +51,8 @@ USER nodejs
 
 EXPOSE 3001
 
+# API_BASE_URL is injected at container start (not build time).
+# Server components read it via process.env.API_BASE_URL at request time.
+# The locale layout injects it into window.__SOVECOM__ for client components.
+# Example: docker run -e API_BASE_URL=https://api.mystore.com <image>
 CMD ["node", "apps/storefront-next/server.js"]

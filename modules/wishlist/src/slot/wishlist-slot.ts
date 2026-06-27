@@ -1,41 +1,45 @@
 /**
- * wishlist — the slot DATA handler. The module returns a typed widget descriptor `{ type, props }`
- * — data only, never code or HTML — over its store mount: `GET /slot?slot=&route=`. The storefront
+ * wishlist -- the slot DATA handler. The module returns a typed widget descriptor `{ type, props }`
+ * -- data only, never code or HTML -- over its store mount: `GET /slot?slot=&route=`. The storefront
  * validates it with `parseWidget` and renders its own `toggle-button` (an interactive, personalized
  * client island).
  *
- * PERSONALIZED + CUSTOMER-SCOPED: identity is read ONLY from the core-verified `req.customer.id` (never
- * client input). A wishlist needs an account, so an ANONYMOUS visitor ⇒ 204 (decline — the island
- * renders nothing). For a signed-in customer the descriptor's `initialOn` is the customer's CURRENT
- * wishlist state for the route's product, and the on/off action paths target THIS module's OWN mount.
+ * PERSONALIZED + VIEWER-SCOPED: identity is resolved via {@link resolveViewer} -- either a
+ * core-verified customer (JWT) or a core-derived guest (sov_guest HMAC cookie). An anonymous
+ * visitor with no guest identity resolves to 'none' -> 204 (decline).
  *
- * The `toggle-button` widget POSTs back with no body, so the product id rides in the action path — the
- * path-based `POST /items/:id/add` and `POST /items/:id/remove` aliases (see api/handlers.ts). Both
- * paths target `/store/v1/modules/wishlist/...` and are additionally pinned to the binding module.
+ * For a logged-in customer, `initialOn` reflects the customer's CURRENT wishlist state.
+ * For a guest, `initialOn` reflects the guest's current guest-wishlist state.
+ *
+ * The `toggle-button` widget POSTs back with no body, so the product id rides in the action
+ * path -- the path-based `POST /items/:id/add` and `POST /items/:id/remove` aliases
+ * (see api/handlers.ts). Both paths target `/store/v1/modules/wishlist/...` and are
+ * additionally pinned to the binding module.
  */
 import type { ModuleHttpRequest, ModuleHttpResponse } from '@sovecom/module-sdk';
 import type { WishlistRepository } from '../db/repository';
+import { resolveViewer } from '../identity/viewer';
 
 /** The slot this module fills (must match `sovecom.module.json` slots[].slot). */
 export const WISHLIST_SLOT = 'product-card-actions';
 
-/** This module's own store mount — the only origin its action paths may target. */
+/** This module's own store mount -- the only origin its action paths may target. */
 const OWN_MOUNT = '/store/v1/modules/wishlist';
 
-/** First value for a query key (the query may carry repeated keys → string[]). */
+/** First value for a query key (the query may carry repeated keys -> string[]). */
 function firstQuery(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
 /**
  * Forbidden bytes in the route product id: control chars (C0 + DEL) or a path separator (`/`, `\`).
- * The route id becomes a path SEGMENT in the emitted action paths, so reject anything that could smuggle
- * a separator/control byte (defense-in-depth; C1's actionPathSchema would also reject the resulting path).
+ * The route id becomes a path SEGMENT in the emitted action paths, so reject anything that could
+ * smuggle a separator/control byte.
  */
 // eslint-disable-next-line no-control-regex
 const FORBIDDEN_ROUTE_CHARS = /[\x00-\x1f\x7f/\\]/;
 
-/** A bound product-id route value (trimmed, 1–64 chars, no control/separator chars). */
+/** A bound product-id route value (trimmed, 1-64 chars, no control/separator chars). */
 function readRouteProductId(req: ModuleHttpRequest): string | undefined {
   const value = firstQuery(req.query.route);
   if (typeof value !== 'string') return undefined;
@@ -45,20 +49,14 @@ function readRouteProductId(req: ModuleHttpRequest): string | undefined {
   return v;
 }
 
-/** The verified customer id, or null when anonymous. */
-function customerIdOrNull(req: ModuleHttpRequest): string | null {
-  const id = req.customer?.id;
-  return typeof id === 'string' && id.length > 0 ? id : null;
-}
-
-/** A bodyless 204 — the module declines to render at this slot. */
+/** A bodyless 204 -- the module declines to render at this slot. */
 function decline(): ModuleHttpResponse {
   return { status: 204 };
 }
 
 /**
- * Handle `GET /slot`. Returns the `toggle-button` descriptor for the route's product scoped to the
- * verified customer, or 204 (anonymous / unknown slot / invalid route).
+ * Handle `GET /slot`. Returns the `toggle-button` descriptor for the route's product scoped to
+ * the resolved viewer (customer or guest), or 204 (no viewer / unknown slot / invalid route).
  */
 export async function handleWishlistSlot(
   req: ModuleHttpRequest,
@@ -69,18 +67,18 @@ export async function handleWishlistSlot(
   const productId = readRouteProductId(req);
   if (!productId) return decline();
 
-  // A wishlist needs an account — an anonymous visitor declines (the island renders nothing).
-  const customerId = customerIdOrNull(req);
-  if (!customerId) return decline();
+  const viewer = resolveViewer(req);
+  // Decline for truly anonymous requests (no customer JWT and no guest cookie).
+  if (viewer.kind === 'none') return decline();
 
-  const initialOn = await repo.has(customerId, productId);
+  let initialOn: boolean;
+  if (viewer.kind === 'customer') {
+    initialOn = await repo.has(req.customer!.id, productId);
+  } else {
+    // viewer.kind === 'guest'
+    initialOn = await repo.guestHas(req.guestId!.id, productId);
+  }
 
-  // The product id rides in the PATH (the toggle posts no body). encodeURIComponent keeps it a single
-  // inert segment under the own mount. This is DEFENSE-IN-DEPTH and intentionally redundant: `readId`
-  // (the route reader) already rejects an id with `/`, `\`, or a control char, and C1's actionPathSchema
-  // bans `%` outright (a clean id never needs encoding) — but encoding here means even if those layers
-  // ever changed, a reserved char could not break out of the single path segment. C2 then re-pins the
-  // path to this binding module (own-mount).
   const seg = encodeURIComponent(productId);
   const descriptor = {
     type: 'toggle-button' as const,

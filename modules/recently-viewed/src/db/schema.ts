@@ -29,11 +29,12 @@ export const TABLE = `"${VIEWS_TABLE_NAME}"`;
 /**
  * `mod_recently-viewed_views` — one row per (viewer, product) that the viewer has looked at.
  *
- * `viewer_key` is the OPAQUE per-viewer key: the core-verified customer id for a logged-in shopper,
- * or a high-entropy storefront-supplied guest token for an anonymous one (see identity/). It is the
- * ONLY scoping key — a read or write is always bound to one `viewer_key`, so one viewer can never
- * see another's history. UNIQUE(viewer_key, product_id) means a re-view of the same product is a
- * dedupe that bumps `viewed_at` (never a second row).
+ * `viewer_key` is the OPAQUE per-viewer key: the core-verified customer id for a logged-in shopper
+ * (prefixed `cust:`), or the core-derived guest id from the sov_guest httpOnly cookie for an
+ * anonymous one (prefixed `guest:`) — see identity/. It is the ONLY scoping key — a read or write
+ * is always bound to one `viewer_key`, so one viewer can never see another's history.
+ * UNIQUE(viewer_key, product_id) means a re-view of the same product is a dedupe that bumps
+ * `viewed_at` (never a second row).
  *
  * ID TYPES — DELIBERATE: `id` is a module-generated `text` PK (a UUID string); `viewer_key` and
  * `product_id` are `text` because a module receives core ids (and the storefront guest token) as

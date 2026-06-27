@@ -6,5 +6,5 @@
   "permissions": ["read:products", "write:own_tables", "subscribe:events", "email:send"],
   "slots": [{ "slot": "product-card-actions", "component": "toggle-button" }],
   "settings": { "schema": "./settings.schema.json" },
-  "tables": ["mod_wishlist_items", "mod_wishlist_digest_log"]
+  "tables": ["mod_wishlist_items", "mod_wishlist_guest_items", "mod_wishlist_digest_log"]
 }

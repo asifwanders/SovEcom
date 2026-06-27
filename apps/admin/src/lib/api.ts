@@ -1,6 +1,11 @@
 import { useAuthStore } from './auth';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
+// Runtime config injected by the container entrypoint at start (see public/config.js).
+// Falls back to the build-time env var so `vite dev` keeps working without a config.js.
+const API_BASE =
+  (typeof window !== 'undefined' && window.__SOVECOM__?.apiBaseUrl) ||
+  import.meta.env.VITE_API_BASE_URL ||
+  '/api';
 
 export class ApiError extends Error {
   constructor(

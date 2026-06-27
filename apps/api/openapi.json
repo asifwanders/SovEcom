@@ -4772,6 +4772,59 @@
         ]
       }
     },
+    "/admin/v1/storefront/home-sections": {
+      "get": {
+        "operationId": "HomeSectionsAdminController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get the tenant home-page marketing sections (admin)",
+        "tags": [
+          "Admin / Storefront"
+        ]
+      },
+      "put": {
+        "operationId": "HomeSectionsAdminController_replace",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutHomeSectionsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Replace the tenant home-page marketing sections (fail-closed: all entries validated or request rejected)",
+        "tags": [
+          "Admin / Storefront"
+        ]
+      }
+    },
+    "/store/v1/storefront/home-sections": {
+      "get": {
+        "operationId": "HomeSectionsStoreController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get the home-page marketing sections (public) — validated descriptors only",
+        "tags": [
+          "Store / Storefront"
+        ]
+      }
+    },
     "/admin/v1/slots": {
       "get": {
         "operationId": "SlotsAdminController_list",
@@ -7421,7 +7474,9 @@
             "minLength": 1,
             "maxLength": 255,
             "x-nestjs_zod-uses-3-point-1-syntax": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Full name of the recipient",
+            "example": "Marie Dupont"
           },
           "company": {
             "anyOf": [
@@ -7436,14 +7491,18 @@
             ],
             "x-nestjs_zod-uses-3-point-1-syntax": true,
             "x-nestjs_zod-empty-type": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Company name (optional)",
+            "example": "Acme Inc."
           },
           "line1": {
             "type": "string",
             "minLength": 1,
             "maxLength": 512,
             "x-nestjs_zod-uses-3-point-1-syntax": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Street address (first line)",
+            "example": "12 Rue de Rivoli"
           },
           "line2": {
             "anyOf": [
@@ -7458,21 +7517,27 @@
             ],
             "x-nestjs_zod-uses-3-point-1-syntax": true,
             "x-nestjs_zod-empty-type": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Street address (second line, e.g. apt/suite)",
+            "example": "Apartment 3"
           },
           "city": {
             "type": "string",
             "minLength": 1,
             "maxLength": 255,
             "x-nestjs_zod-uses-3-point-1-syntax": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "City name",
+            "example": "Paris"
           },
           "postalCode": {
             "type": "string",
             "minLength": 1,
             "maxLength": 32,
             "x-nestjs_zod-uses-3-point-1-syntax": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Postal code",
+            "example": "75001"
           },
           "region": {
             "anyOf": [
@@ -7487,13 +7552,17 @@
             ],
             "x-nestjs_zod-uses-3-point-1-syntax": true,
             "x-nestjs_zod-empty-type": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "State, province, or region (optional)",
+            "example": "Île-de-France"
           },
           "country": {
             "type": "string",
             "pattern": "^[A-Za-z]{2}$",
             "x-nestjs_zod-uses-3-point-1-syntax": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Country code (ISO 3166-1 alpha-2, two uppercase letters)",
+            "example": "FR"
           },
           "phone": {
             "anyOf": [
@@ -7508,7 +7577,9 @@
             ],
             "x-nestjs_zod-uses-3-point-1-syntax": true,
             "x-nestjs_zod-empty-type": true,
-            "x-nestjs_zod-parent-additional-properties": false
+            "x-nestjs_zod-parent-additional-properties": false,
+            "description": "Phone number (optional)",
+            "example": "+33 1 2345 6789"
           }
         },
         "required": [
@@ -8327,6 +8398,21 @@
           "email",
           "otp",
           "password"
+        ]
+      },
+      "PutHomeSectionsBody": {
+        "type": "object",
+        "properties": {
+          "sections": {
+            "type": "array",
+            "description": "The ordered list of marketing section descriptors for the home page. Each entry must be a `{ type, settings }` object. Every entry is validated by the SDK schema — a single invalid entry rejects the whole request. Capped at 50 entries.",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "sections"
         ]
       },
       "HealthCheckResult": {

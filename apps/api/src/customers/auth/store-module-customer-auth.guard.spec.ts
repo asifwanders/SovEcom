@@ -62,8 +62,10 @@ function ctxWith(token: string | null): {
   const req: { headers: Record<string, string>; customer?: AuthenticatedCustomer } = {
     headers: token ? { authorization: `Bearer ${token}` } : {},
   };
+  // Minimal response stub -- the guard only calls res.cookie() on the anonymous guest path.
+  const res = { cookie: () => undefined };
   const ctx = {
-    switchToHttp: () => ({ getRequest: () => req }),
+    switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }),
   } as unknown as ExecutionContext;
   return { ctx, req };
 }

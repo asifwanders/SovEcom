@@ -88,3 +88,27 @@ export { CORE_API_VERSION } from '@sovecom/module-sdk';
 
 // ── store-contract types ───────────────────────────────────────────────────────
 export type { ActiveTheme, SlotBinding, SlotMap } from './store-contract.js';
+
+// ── marketing section settings schemas ────────────────────────────────────────
+// Shared, validated contract for hero-banner / cta-banner / promo-tiles / rich-text sections.
+// The API, admin editor, and storefront all import from here — one source of truth for validation.
+export {
+  MARKETING_SECTION_TYPES,
+  MARKETING_SECTION_REGISTRY,
+  marketingHrefSchema,
+  marketingImageUrlSchema,
+  heroBannerSettingsSchema,
+  ctaBannerSettingsSchema,
+  promoTilesSettingsSchema,
+  richTextSettingsSchema,
+  parseMarketingSectionSettings,
+  parseMarketingSection,
+} from './marketing-sections.js';
+export type {
+  MarketingSectionType,
+  MarketingSectionDescriptor,
+  HeroBannerSettings,
+  CtaBannerSettings,
+  PromoTilesSettings,
+  RichTextSettings,
+} from './marketing-sections.js';

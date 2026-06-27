@@ -26,9 +26,9 @@ RUN pnpm install --frozen-lockfile
 COPY packages/ ./packages/
 COPY apps/api/ ./apps/api/
 
-# Build workspace packages that API depends on
-RUN pnpm --filter @sovecom/theme-sdk build
+# Build workspace packages that API depends on (module-sdk first — theme-sdk depends on it)
 RUN pnpm --filter @sovecom/module-sdk build
+RUN pnpm --filter @sovecom/theme-sdk build
 RUN pnpm --filter @sovecom/client-js build
 
 # Build the API

@@ -24,7 +24,7 @@ export interface ModuleHttpRequest {
    * The CORE-VERIFIED customer principal for this request, or `undefined` for an anonymous call.
    *
    * Set ONLY by the core proxy from a customer JWT it verified itself (the store mount runs an
-   * optional customer-auth guard). It is NEVER read from client input — a `customer` field in the
+   * optional customer-auth guard). It is NEVER read from client input -- a `customer` field in the
    * request body, headers, or query cannot influence it, and the raw token is still stripped before
    * the request reaches the module. Absent (`undefined`) when no valid customer token was presented.
    *
@@ -32,6 +32,21 @@ export interface ModuleHttpRequest {
    * a customer-scoped module endpoint should return 401/empty when this is absent.
    */
   readonly customer?: { readonly id: string };
+  /**
+   * The CORE-DERIVED guest identity for this request, or `undefined` when a verified customer is
+   * present or no guest cookie exists yet.
+   *
+   * Set ONLY by the core proxy from a signed, tenant-scoped `sov_guest` httpOnly cookie that the
+   * core minted itself (HMAC-SHA256 over `{guestId, tenantId}`). It is NEVER read from client
+   * input -- no body/header/query field can influence it. The `id` is an opaque, high-entropy UUID
+   * the core generated; a module must never parse or assume its format beyond using it as an
+   * opaque scoping key.
+   *
+   * Priority: when `customer` is set, `guestId` is absent -- a logged-in customer always wins.
+   * When a guest logs in, the storefront calls the merge endpoint so guest data migrates to the
+   * customer id before the next module request arrives.
+   */
+  readonly guestId?: { readonly id: string };
 }
 
 export interface ModuleHttpResponse {

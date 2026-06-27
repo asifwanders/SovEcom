@@ -10,7 +10,7 @@ import { RecentlyViewedRepository } from '../src/db/repository';
 import { resolveSettings } from '../src/settings';
 import { FakeTables, FakeStore, FakeCategoryResolver } from './_mock-sdk';
 
-const GUEST = 'guest-token-abcdef0123456789';
+const GUEST_ID = { id: 'guest-uuid-integration-test' };
 
 function makeDeps(): { deps: HandlerDeps; tables: FakeTables } {
   const tables = new FakeTables();
@@ -29,7 +29,8 @@ const slotReq = (query: Record<string, string>): ModuleHttpRequest => ({
   method: 'GET',
   path: '/slot',
   query,
-  headers: { 'x-rv-guest': GUEST },
+  headers: {},
+  guestId: GUEST_ID,
 });
 
 describe('recently-viewed slot — parseWidget integration', () => {
@@ -37,7 +38,7 @@ describe('recently-viewed slot — parseWidget integration', () => {
     const { deps, tables } = makeDeps();
     tables.views.push({
       id: 'v1',
-      viewer_key: `guest:${GUEST}`,
+      viewer_key: `guest:${GUEST_ID.id}`,
       product_id: 'p1',
       viewed_at: new Date(Date.UTC(2026, 0, 1)).toISOString(),
     });

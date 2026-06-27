@@ -115,6 +115,19 @@ export default async function LocaleLayout({
         {/* No-FOUC dark-mode bootstrap: reads the `theme` cookie and sets `.dark` class
             before first paint to prevent flash. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* Runtime config: API base URL is resolved server-side at request time so one
+            Docker image works on any domain — no baked-in build arg needed.
+            Client components (cart, auth, wishlists) read window.__SOVECOM__.apiBaseUrl. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__SOVECOM__=${JSON.stringify({
+              apiBaseUrl:
+                process.env.API_BASE_URL ||
+                process.env.NEXT_PUBLIC_API_BASE_URL ||
+                'http://localhost:3000',
+            })};`,
+          }}
+        />
       </head>
       <body
         className="bg-background text-foreground font-sans min-h-screen flex flex-col"
