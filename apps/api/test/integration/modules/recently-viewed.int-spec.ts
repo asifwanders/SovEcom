@@ -312,19 +312,19 @@ describe('Recently-viewed module end-to-end (integration, real PG)', () => {
       await call({
         method: 'POST',
         path: '/views',
-        query: { guest: GUEST_TOKEN },
+        guestId: { id: GUEST_TOKEN },
         body: JSON.stringify({ productId: productIds[1] }),
       });
       await call({
         method: 'POST',
         path: '/views',
-        query: { guest: guestB },
+        guestId: { id: guestB },
         body: JSON.stringify({ productId: productIds[2] }),
       });
 
       // The guest only sees their own token-scoped view.
       expect(
-        idsOf(await call({ method: 'GET', path: '/recent', query: { guest: GUEST_TOKEN } })),
+        idsOf(await call({ method: 'GET', path: '/recent', guestId: { id: GUEST_TOKEN } })),
       ).toEqual([productIds[1]]);
       // The customer never sees the guest's views.
       expect(idsOf(await call({ method: 'GET', path: '/recent', customer: cust }))).toEqual([
@@ -350,7 +350,7 @@ describe('Recently-viewed module end-to-end (integration, real PG)', () => {
         method: 'POST',
         path: '/views',
         customer: cust,
-        query: { guest: collidingToken },
+        guestId: { id: collidingToken },
         body: JSON.stringify({ productId: productIds[0] }),
       });
       expect(post.status).toBe(204);
@@ -361,7 +361,7 @@ describe('Recently-viewed module end-to-end (integration, real PG)', () => {
       const guestView = await call({
         method: 'GET',
         path: '/recent',
-        query: { guest: collidingToken },
+        guestId: { id: collidingToken },
       });
       expect(guestView.status).toBe(200);
       expect(idsOf(guestView)).toEqual([]);
