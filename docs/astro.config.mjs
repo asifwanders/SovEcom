@@ -2,6 +2,7 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightOpenAPI, { openAPISidebarGroups } from 'starlight-openapi';
+import remarkGfm from 'remark-gfm';
 
 // API reference specs are split from apps/api/openapi.json by scripts/split-openapi.mjs
 // (run automatically before dev/build). One section per surface.
@@ -9,10 +10,19 @@ import starlightOpenAPI, { openAPISidebarGroups } from 'starlight-openapi';
 // https://astro.build/config
 export default defineConfig({
   site: 'https://docs.sovecom.io',
+  // Astro 6 no longer bundles GFM by default; add it so Markdown tables, strikethrough,
+  // task lists, and autolinks render across all docs (.md + .mdx via extendMarkdownConfig).
+  markdown: { remarkPlugins: [remarkGfm] },
   integrations: [
     starlight({
       title: 'SovEcom',
       description: 'The open-source headless ecommerce platform built for the European Union.',
+      logo: {
+        light: './src/assets/logo-light.svg',
+        dark: './src/assets/logo-dark.svg',
+        replacesTitle: true,
+      },
+      favicon: '/favicon.svg',
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/asifwanders/SovEcom' },
       ],
