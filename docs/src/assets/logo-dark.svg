@@ -1,0 +1,20 @@
+<svg width="300" height="80" viewBox="0 0 300 80" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SovEcom">
+  <!-- Wordmark — dark theme -->
+  <g transform="translate(6 8) scale(0.5)">
+    <g stroke="#2DD4BF" stroke-width="6" stroke-linecap="round">
+      <path d="M100 28 L64 64"/>
+      <path d="M64 64 L28 100"/>
+      <path d="M28 28 L64 64" stroke-opacity="0.4"/>
+      <path d="M100 100 L64 64" stroke-opacity="0.4"/>
+    </g>
+    <circle cx="100" cy="28" r="10" fill="#E8E4DE"/>
+    <circle cx="28" cy="100" r="10" fill="#E8E4DE"/>
+    <circle cx="28" cy="28" r="7.5" fill="#00B9A0"/>
+    <circle cx="100" cy="100" r="7.5" fill="#00B9A0"/>
+    <circle cx="64" cy="64" r="15" fill="#2DD4BF"/>
+    <circle cx="64" cy="64" r="6" fill="#1A1816"/>
+  </g>
+  <text x="76" y="52" font-family="Ubuntu, system-ui, sans-serif" font-size="40" font-weight="700" letter-spacing="-0.5">
+    <tspan fill="#E8E4DE">Sov</tspan><tspan fill="#2DD4BF">Ecom</tspan>
+  </text>
+</svg>

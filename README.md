@@ -1,6 +1,9 @@
 <div align="center">
 
-# SovEcom
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="brand/logos/wordmark/png/sovecom-wordmark-dark-640.png">
+  <img alt="SovEcom" src="brand/logos/wordmark/png/sovecom-wordmark-light-640.png" width="360">
+</picture>
 
 **The open-source headless ecommerce platform built for the European Union — from day one.**
 
