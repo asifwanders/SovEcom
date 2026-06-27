@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createSovEcomClient, SovEcomApiError, CLIENT_JS_VERSION } from '../src/index.js';
+import pkg from '../package.json';
 
 /** A fetch stub that records the call and returns a canned JSON response. */
 function stubFetch(
@@ -23,8 +24,8 @@ function headersOf(init: RequestInit): Headers {
 }
 
 describe('@sovecom/client-js', () => {
-  it('exposes a bumped version (past the v0.0.1 stub)', () => {
-    expect(CLIENT_JS_VERSION).toBe('0.1.0');
+  it('exposes a version that matches package.json (guards against drift)', () => {
+    expect(CLIENT_JS_VERSION).toBe(pkg.version);
   });
 
   it('strips a trailing slash from baseUrl and fills path params', async () => {

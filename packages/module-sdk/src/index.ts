@@ -10,7 +10,7 @@
  */
 
 /** SDK package version (independent of the core API contract version below). */
-export const MODULE_SDK_VERSION = '1.0.0-rc.1';
+export const MODULE_SDK_VERSION = '1.0.1';
 
 // ── author ergonomics ───────────────────────────────────────────────────────────
 export { defineModule } from './module.js';

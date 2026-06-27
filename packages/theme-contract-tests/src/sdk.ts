@@ -4,16 +4,14 @@
  * (`SLOT_SLUG_RE`). These are REUSED, never re-declared — there is exactly one
  * theme-manifest validator.
  *
- * The dual-context wrinkle: `@sovecom/theme-sdk` ships SOURCE-FIRST (`package.json#main` → `src/index.ts`, no bundler). In the
- * TS/vitest toolchain a bare `import '@sovecom/theme-sdk'` resolves to that `.ts` source — fine. But
- * the EMITTED `dist/cli.js` runs under plain `node`, where the same bare specifier resolves to raw
- * `.ts` node cannot execute (exactly the ERR_MODULE_NOT_FOUND). No bundler is used to paper over it.
- *
- * So we load the SDK through `createRequire` against its COMPILED `dist/index.js` — valid CJS that
- * plain `node` (and vitest) can both `require` synchronously, present because the SDK emits CJS via
- * `tsc` and is built before this package runs (turbo `^build`; the built-bin test also
- * builds it explicitly). This is the ONLY runtime contact with the SDK and yields the REAL exported
- * functions — no second, drifting copy of any contract rule is declared here.
+ * `@sovecom/theme-sdk` ships DIST-FIRST: `package.json#main` and `exports["."]` both resolve to the
+ * compiled `dist/index.js` (valid CJS emitted by `tsc`). We load it through `createRequire` so the
+ * bare specifier resolves via Node — to that built CJS — identically under vitest AND under plain
+ * `node` (the emitted `dist/cli.js` bin). The SDK is built before this package runs (turbo `^build`;
+ * the built-bin test also builds it explicitly). NOTE: require the bare `@sovecom/theme-sdk`, not
+ * `@sovecom/theme-sdk/dist/index.js` — the SDK's strict `exports` map exposes only `.`, so the
+ * explicit subpath is blocked (ERR_PACKAGE_PATH_NOT_EXPORTED). This is the ONLY runtime contact with
+ * the SDK and yields the REAL exported validators — no drifting copy.
  */
 import { createRequire } from 'node:module';
 import type {
@@ -33,10 +31,10 @@ const require = createRequire(import.meta.url);
 
 function loadSdk(): SdkSurface {
   try {
-    return require('@sovecom/theme-sdk/dist/index.js') as SdkSurface;
+    return require('@sovecom/theme-sdk') as SdkSurface;
   } catch (cause) {
     throw new Error(
-      '@sovecom/theme-contract-tests could not load @sovecom/theme-sdk/dist/index.js. ' +
+      '@sovecom/theme-contract-tests could not load @sovecom/theme-sdk (its built CJS dist). ' +
         'The SDK must be built first (CJS via tsc) — run `pnpm --filter @sovecom/theme-sdk build` ' +
         'or `pnpm build` at the repo root.',
       { cause },

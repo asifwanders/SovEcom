@@ -16,7 +16,7 @@
  */
 
 /** SDK package version (independent of the core API contract version below). */
-export const THEME_SDK_VERSION = '1.0.0-rc.1';
+export const THEME_SDK_VERSION = '1.0.1';
 
 // ── author ergonomics ───────────────────────────────────────────────────────────
 export { defineTheme } from './theme.js';
