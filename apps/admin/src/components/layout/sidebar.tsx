@@ -233,15 +233,13 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: Side
     g.items.some((item) => location.pathname.startsWith(item.to)),
   )?.id;
 
-  const { openGroups, toggle, setOpen, expandAll, collapseAll } = useGroupState(allGroupIds);
+  const { openGroups, toggle, expandAll, collapseAll } = useGroupState();
 
-  // Auto-expand the group containing the active route when it changes.
+  // On every navigation or reload, show ONLY the group that contains the active route —
+  // all other groups collapse. Manual opens (toggle) last until the next navigation.
   useEffect(() => {
-    if (activeGroupId && !openGroups.has(activeGroupId)) {
-      setOpen(activeGroupId, true);
-    }
-    // We only want to react to route changes, not openGroups changes.
-  }, [activeGroupId, setOpen]);
+    expandAll(activeGroupId ? [activeGroupId] : []);
+  }, [location.pathname, activeGroupId, expandAll]);
 
   const allOpen = allGroupIds.every((id) => openGroups.has(id));
 

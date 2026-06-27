@@ -174,6 +174,24 @@ describe('Sidebar active-route auto-expand', () => {
     expect(ordersBtn).toHaveAttribute('aria-expanded', 'true');
   });
 
+  it('keeps groups WITHOUT the active route collapsed on load', () => {
+    renderSidebar({ route: '/orders' });
+
+    // Only the active group (Orders) is open; everything else starts collapsed.
+    expect(screen.getByRole('button', { name: /^Orders$/i })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: /^Catalog$/i })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.getByRole('button', { name: /^Storefront$/i })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+  });
+
   it('marks the active nav item with aria-current="page"', async () => {
     renderSidebar({ route: '/orders' });
 
@@ -211,30 +229,10 @@ describe('Sidebar expand-all / collapse-all', () => {
     expect(btn).toBeInTheDocument();
   });
 
-  it('collapseAll closes all group panels', async () => {
-    renderSidebar();
-
-    // Click "Collapse all"
-    const btn = screen.getByRole('button', { name: /collapse all/i });
-    await userEvent.click(btn);
-
-    // All group headers should now be collapsed
-    const groupBtns = screen.getAllByRole('button', {
-      name: /Overview|Catalog|Orders|Customers|Marketing|Storefront|Settings/i,
-    });
-    for (const groupBtn of groupBtns) {
-      expect(groupBtn).toHaveAttribute('aria-expanded', 'false');
-    }
-  });
-
   it('expandAll opens all group panels', async () => {
     renderSidebar();
 
-    // First collapse all
-    const collapseBtn = screen.getByRole('button', { name: /collapse all/i });
-    await userEvent.click(collapseBtn);
-
-    // Then expand all
+    // Default is "only the active group open", so the toggle starts as "Expand all".
     const expandBtn = screen.getByRole('button', { name: /expand all/i });
     await userEvent.click(expandBtn);
 
@@ -243,6 +241,21 @@ describe('Sidebar expand-all / collapse-all', () => {
     });
     for (const groupBtn of groupBtns) {
       expect(groupBtn).toHaveAttribute('aria-expanded', 'true');
+    }
+  });
+
+  it('collapseAll closes all group panels', async () => {
+    renderSidebar();
+
+    // Open everything first (default only opens the active group), then collapse all.
+    await userEvent.click(screen.getByRole('button', { name: /expand all/i }));
+    await userEvent.click(screen.getByRole('button', { name: /collapse all/i }));
+
+    const groupBtns = screen.getAllByRole('button', {
+      name: /Overview|Catalog|Orders|Customers|Marketing|Storefront|Settings/i,
+    });
+    for (const groupBtn of groupBtns) {
+      expect(groupBtn).toHaveAttribute('aria-expanded', 'false');
     }
   });
 });
