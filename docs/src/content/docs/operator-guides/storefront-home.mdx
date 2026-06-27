@@ -1,0 +1,37 @@
+---
+title: Home Page Sections
+description: Build your storefront home page from hero banners, call-to-action strips, promo tiles, and rich text in the admin.
+---
+
+Your storefront home page is built from sections you arrange in the admin. Add a hero banner, a call-to-action strip, a grid of promo tiles, and rich-text blocks, then order them into the layout you want. The storefront renders them in sequence at the top of the home page.
+
+## Open the editor
+
+In the admin, go to **Storefront → Home sections**. You need the `themes:write` permission, which owners and admins have.
+
+The editor lists the sections on your home page from top to bottom. An empty list means the storefront shows only your theme's default home content.
+
+## Section types
+
+Each type has its own fields:
+
+- **Hero banner.** A full-width banner. Set a headline, an optional subheadline, an optional background image, a button label and link, the text alignment, and an optional dark overlay so text stays legible over an image.
+- **Call-to-action banner.** A compact strip with a headline, optional body text, and a button in the primary or secondary style.
+- **Promo tiles.** A grid of linked tiles (up to 12), each with a label, a link, an optional image, and an optional caption. Choose 2, 3, or 4 columns.
+- **Rich text.** A block of formatted text written in Markdown.
+
+## Build the page
+
+1. Click **Add section** and pick a type.
+2. Fill in the fields. For hero and tile images, click **Upload image** and choose a file. The admin stores it and fills in the URL.
+3. Reorder sections with the up and down arrows on each card.
+4. Remove a section with the X on its card.
+5. Click **Save**. The storefront picks up the change on its next refresh.
+
+## What the storefront enforces
+
+The storefront validates everything you save, so a mistake in the editor can't break or compromise your home page:
+
+- **Links** must be a path on your store (such as `/products`) or a full `http(s)` URL. The editor rejects anything else.
+- **Images** render only from your store's own media. Upload them through the editor so they serve from the right origin.
+- **Rich text** renders as sanitized Markdown. The storefront strips raw HTML and scripts, so a pasted `<script>` never runs on your site.

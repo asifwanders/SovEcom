@@ -22,4 +22,25 @@ Copy `.env.example` to `.env` and configure:
 - `MEILISEARCH_URL`
 - `MEILI_MASTER_KEY`
 
-Last updated: 2026-06-09
+## Published images
+
+SovEcom publishes one image per service to GitHub Container Registry:
+
+- `ghcr.io/asifwanders/sovecom-api`
+- `ghcr.io/asifwanders/sovecom-admin`
+- `ghcr.io/asifwanders/sovecom-setup`
+- `ghcr.io/asifwanders/sovecom-storefront`
+
+Each stable release tags `:1.2.3`, `:1.2`, and `:latest`. The images target `linux/amd64`.
+
+## Point the apps at your API
+
+The admin, setup, and storefront images read the API URL at container start, so the same image runs on any domain. Set `API_BASE_URL` when you start them:
+
+```bash
+docker run -e API_BASE_URL=https://api.yourstore.com ghcr.io/asifwanders/sovecom-admin:latest
+```
+
+In `docker-compose.yml` the apps already receive `API_BASE_URL` from `SOVECOM_DOMAIN`, so a Compose deployment needs nothing extra.
+
+Last updated: 2026-06-27

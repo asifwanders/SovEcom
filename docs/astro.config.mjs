@@ -47,6 +47,7 @@ export default defineConfig({
           items: [
             { label: 'Getting Started', slug: 'operator-guides/getting-started' },
             { label: 'Catalog', slug: 'operator-guides/catalog' },
+            { label: 'Home Page', slug: 'operator-guides/storefront-home' },
             { label: 'Order Management', slug: 'operator-guides/orders' },
             { label: 'Customer Management', slug: 'operator-guides/customers' },
             { label: 'Discounts', slug: 'operator-guides/discounts' },
