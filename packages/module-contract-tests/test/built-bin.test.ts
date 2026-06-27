@@ -28,7 +28,7 @@ beforeAll(() => {
   execFileSync(tscBin, ['-p', join(sdkRoot, 'tsconfig.json')], { cwd: sdkRoot, stdio: 'pipe' });
   execFileSync(tscBin, ['-p', join(pkgRoot, 'tsconfig.json')], { cwd: pkgRoot, stdio: 'pipe' });
   tmpRoot = mkdtempSync(join(tmpdir(), 'mct-bin-'));
-});
+}, 120_000); // two full tsc builds — well past vitest's default 10s hook timeout on CI runners
 
 afterAll(() => {
   rmSync(tmpRoot, { recursive: true, force: true });
