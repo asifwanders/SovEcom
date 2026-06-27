@@ -127,8 +127,10 @@ export function NavGroup({
               key={item.to}
               to={item.to}
               onClick={onItemClick}
+              // Indented (pl-6) to read as children of the open group, and a notch smaller
+              // (text-[11px]) than the uppercase group heading (text-xs) above them.
               className={cn(
-                'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                'flex items-center gap-2.5 rounded-md py-1.5 pr-3 pl-6 text-[11px] font-medium transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 item.active
                   ? 'bg-primary/10 text-primary'
@@ -136,7 +138,7 @@ export function NavGroup({
               )}
               aria-current={item.active ? 'page' : undefined}
             >
-              <item.Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+              <item.Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span className="truncate">{item.label}</span>
             </Link>
           ))}
