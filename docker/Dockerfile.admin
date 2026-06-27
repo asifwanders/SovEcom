@@ -24,6 +24,8 @@ COPY packages/ ./packages/
 COPY apps/admin/ ./apps/admin/
 COPY brand/ ./brand/
 
+RUN pnpm --filter @sovecom/module-sdk build
+RUN pnpm --filter @sovecom/theme-sdk build
 RUN pnpm --filter @sovecom/client-js build
 
 ARG VITE_API_BASE_URL=http://localhost:3000

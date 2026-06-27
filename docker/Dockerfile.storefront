@@ -24,6 +24,8 @@ COPY packages/ ./packages/
 COPY apps/storefront-next/ ./apps/storefront-next/
 COPY brand/ ./brand/
 
+RUN pnpm --filter @sovecom/module-sdk build
+RUN pnpm --filter @sovecom/theme-sdk build
 RUN pnpm --filter @sovecom/client-js build
 
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
