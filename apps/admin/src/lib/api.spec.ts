@@ -134,3 +134,20 @@ describe('apiFetch', () => {
     expect(useAuthStore.getState().accessToken).toBeNull();
   });
 });
+
+// Regression guard: the API base MUST honor the runtime config injected via window.__SOVECOM__
+// (public/config.js), not just the build-time VITE_API_BASE_URL. App.tsx's session bootstrap
+// imports this same constant, so a runtime-configured deploy reaches the real API on reload.
+describe('API_BASE (runtime config)', () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.unstubAllGlobals();
+  });
+
+  it('resolves from window.__SOVECOM__.apiBaseUrl injected at runtime', async () => {
+    vi.resetModules();
+    vi.stubGlobal('window', { __SOVECOM__: { apiBaseUrl: 'https://api.runtime.example' } });
+    const mod = await import('./api');
+    expect(mod.API_BASE).toBe('https://api.runtime.example');
+  });
+});

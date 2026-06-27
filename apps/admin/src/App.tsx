@@ -5,6 +5,7 @@ import { queryClient } from '@/lib/query-client';
 import { LocaleProvider } from '@/lib/i18n-context';
 import { AuthGuard } from '@/components/auth/auth-guard';
 import { useAuthStore } from '@/lib/auth';
+import { API_BASE, refreshAccessToken } from '@/lib/api';
 import AuthenticatedLayout from '@/routes/_layout';
 import LoginPage from '@/routes/login';
 import TwoFactorPage from '@/routes/two-factor';
@@ -37,10 +38,7 @@ import PagesPage from '@/routes/pages';
 import PageFormPage from '@/routes/page-form';
 import BusinessIdentityPage from '@/routes/business-identity';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
-
 function App() {
-  const setAccessToken = useAuthStore((s) => s.setAccessToken);
   const setUser = useAuthStore((s) => s.setUser);
   const setIsLoading = useAuthStore((s) => s.setIsLoading);
   const logout = useAuthStore((s) => s.logout);
@@ -52,20 +50,17 @@ function App() {
     setIsLoading(true);
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/admin/v1/auth/refresh`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-        });
+        // Use the SHARED, deduped refresh from api.ts — concurrent refreshes (bootstrap +
+        // any apiFetch retry) coalesce into one request, so the single-use refresh-token
+        // cookie is never double-consumed (which would 401 → force a redirect to /login).
+        const token = await refreshAccessToken();
         if (cancelled) return;
-        if (res.ok) {
-          const data = (await res.json()) as { accessToken: string };
-          setAccessToken(data.accessToken);
-          // Fetch current user profile
+        if (token) {
+          // Fetch current user profile (non-fatal — the access token is already valid)
           try {
             const meRes = await fetch(`${API_BASE}/admin/v1/auth/me`, {
               credentials: 'include',
-              headers: { Authorization: `Bearer ${data.accessToken}` },
+              headers: { Authorization: `Bearer ${token}` },
             });
             if (!cancelled && meRes.ok) {
               const user = await meRes.json();

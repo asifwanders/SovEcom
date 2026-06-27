@@ -2,7 +2,9 @@ import { useAuthStore } from './auth';
 
 // Runtime config injected by the container entrypoint at start (see public/config.js).
 // Falls back to the build-time env var so `vite dev` keeps working without a config.js.
-const API_BASE =
+// Exported as the SINGLE source of truth for the API base — App.tsx's session bootstrap
+// must use this too, or runtime-configured deploys hit the build-time localhost default.
+export const API_BASE =
   (typeof window !== 'undefined' && window.__SOVECOM__?.apiBaseUrl) ||
   import.meta.env.VITE_API_BASE_URL ||
   '/api';
@@ -21,7 +23,7 @@ export class ApiError extends Error {
 let isRefreshing = false;
 let refreshPromise: Promise<string | null> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+export async function refreshAccessToken(): Promise<string | null> {
   if (isRefreshing && refreshPromise) {
     return refreshPromise;
   }
