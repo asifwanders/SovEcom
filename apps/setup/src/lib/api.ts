@@ -11,8 +11,10 @@
  */
 import type { paths } from '@sovecom/client-js';
 
-/** Mirror apps/admin: same env var, same `/api` proxy fallback (vite dev proxy → :3000). */
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api') as string;
+/** Mirror apps/admin: runtime config first, then build-time env var, then `/api` proxy fallback. */
+const API_BASE = ((typeof window !== 'undefined' && window.__SOVECOM__?.apiBaseUrl) ||
+  import.meta.env.VITE_API_BASE_URL ||
+  '/api') as string;
 
 const SETUP_PREFIX = '/setup/v1';
 

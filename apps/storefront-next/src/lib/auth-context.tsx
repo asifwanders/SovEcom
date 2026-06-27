@@ -230,7 +230,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
    * items remain in the guest table and can be retried, or lost on cookie expiry.
    */
   const mergeGuestWishlist = useCallback((accessToken: string): void => {
-    void fetch(`${apiBaseUrl}/store/v1/modules/wishlist/merge-guest`, {
+    void fetch(`${apiBaseUrl()}/store/v1/modules/wishlist/merge-guest`, {
       method: 'POST',
       credentials: 'include',
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -248,7 +248,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
    * history remains in the guest key space and can be retried, or expires with the cookie.
    */
   const mergeGuestRecentlyViewed = useCallback((accessToken: string): void => {
-    void fetch(`${apiBaseUrl}/store/v1/modules/recently-viewed/merge-guest`, {
+    void fetch(`${apiBaseUrl()}/store/v1/modules/recently-viewed/merge-guest`, {
       method: 'POST',
       credentials: 'include',
       headers: { Authorization: `Bearer ${accessToken}` },

@@ -25,11 +25,21 @@ import { createSovEcomClient, type SovEcomClient } from '@sovecom/client-js';
 const DEFAULT_API_BASE_URL = 'http://localhost:3000';
 
 /**
- * Resolve the API origin from the PUBLIC env (inlined into the client bundle), falling back to
- * localhost. Exported so client components that must issue a RAW credentialed `fetch` reuse the SAME
+ * Resolve the API origin at runtime. Precedence:
+ *   1. window.__SOVECOM__.apiBaseUrl  — injected by the locale layout server component from
+ *      process.env.API_BASE_URL at request time; makes one Docker image work on any domain.
+ *   2. process.env.NEXT_PUBLIC_API_BASE_URL — build-time fallback; keeps `next dev` working
+ *      without a runtime env.
+ *   3. DEFAULT_API_BASE_URL (localhost:3000) — local dev with no env at all.
+ *
+ * Exported so client components that issue raw credentialed `fetch` calls reuse the same
  * browser-safe origin resolution instead of hardcoding the base URL.
  */
 export function apiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    const runtimeUrl = window.__SOVECOM__?.apiBaseUrl;
+    if (runtimeUrl && runtimeUrl !== '__API_BASE_URL__') return runtimeUrl;
+  }
   return process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_API_BASE_URL;
 }
 

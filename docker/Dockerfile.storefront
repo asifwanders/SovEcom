@@ -49,4 +49,8 @@ USER nodejs
 
 EXPOSE 3001
 
+# API_BASE_URL is injected at container start (not build time).
+# Server components read it via process.env.API_BASE_URL at request time.
+# The locale layout injects it into window.__SOVECOM__ for client components.
+# Example: docker run -e API_BASE_URL=https://api.mystore.com <image>
 CMD ["node", "apps/storefront-next/server.js"]

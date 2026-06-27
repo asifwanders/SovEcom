@@ -106,8 +106,10 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.admin
-      args:
-        VITE_API_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
+      # No build-time VITE_API_BASE_URL — the API base is injected at container start
+      # via API_BASE_URL below, so the same image works on any domain (publishable to GHCR).
+    environment:
+      API_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
     depends_on:
       api:
         condition: service_healthy
@@ -118,8 +120,9 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.setup
-      args:
-        VITE_API_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
+      # No build-time VITE_API_BASE_URL — see admin comment above.
+    environment:
+      API_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
     depends_on:
       api:
         condition: service_healthy
@@ -130,11 +133,12 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.storefront
-      args:
-        NEXT_PUBLIC_API_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
+      # No NEXT_PUBLIC_API_BASE_URL build arg — API base is resolved at request time from
+      # process.env.API_BASE_URL (server components) and window.__SOVECOM__ (client components).
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
+      # Public URL for client-side API calls (browser → API, must be publicly reachable).
+      API_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
     depends_on:
       api:
         condition: service_healthy

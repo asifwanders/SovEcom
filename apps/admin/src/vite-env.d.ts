@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** API origin override; mirrors apps/admin. Defaults to the `/api` dev proxy. */
+  /** API origin override. Defaults to the `/api` dev proxy when unset. */
   readonly VITE_API_BASE_URL?: string;
 }
 

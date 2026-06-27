@@ -18,6 +18,7 @@ import React from 'react';
 const request = vi.fn();
 vi.mock('./browser-client', () => ({
   createBrowserClient: () => ({ request }),
+  apiBaseUrl: () => 'http://api.test',
 }));
 
 import { SovEcomApiError } from '@sovecom/client-js';
@@ -46,6 +47,12 @@ function unauthorized() {
 
 beforeEach(() => {
   request.mockReset();
+  // login() fires fire-and-forget guest-merge calls via raw fetch (not the client mock);
+  // jsdom has no fetch, so stub it so those calls don't throw synchronously.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
+  );
 });
 afterEach(() => {
   vi.restoreAllMocks();
