@@ -196,7 +196,9 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          # amd64 only: emulated arm64 (QEMU) builds of the heavy Node images (api,
+          # storefront) OOM/hang on hosted runners. Restore arm64 via native arm runners later.
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -253,31 +255,66 @@ jobs:
 
       - name: Publish @sovecom/module-sdk
         working-directory: packages/module-sdk
-        run: pnpm publish --access public --provenance --no-git-checks --tag ${{ steps.tag.outputs.dist_tag }}
+        run: |
+          name=$(node -p "require('./package.json').name")
+          ver=$(node -p "require('./package.json').version")
+          if npm view "$name@$ver" version >/dev/null 2>&1; then
+            echo "$name@$ver already published — skipping"
+          else
+            pnpm publish --access public --provenance --no-git-checks --tag ${{ steps.tag.outputs.dist_tag }}
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish @sovecom/theme-sdk
         working-directory: packages/theme-sdk
-        run: pnpm publish --access public --provenance --no-git-checks --tag ${{ steps.tag.outputs.dist_tag }}
+        run: |
+          name=$(node -p "require('./package.json').name")
+          ver=$(node -p "require('./package.json').version")
+          if npm view "$name@$ver" version >/dev/null 2>&1; then
+            echo "$name@$ver already published — skipping"
+          else
+            pnpm publish --access public --provenance --no-git-checks --tag ${{ steps.tag.outputs.dist_tag }}
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish @sovecom/client-js
         working-directory: packages/client-js
-        run: pnpm publish --access public --provenance --no-git-checks --tag ${{ steps.tag.outputs.dist_tag }}
+        run: |
+          name=$(node -p "require('./package.json').name")
+          ver=$(node -p "require('./package.json').version")
+          if npm view "$name@$ver" version >/dev/null 2>&1; then
+            echo "$name@$ver already published — skipping"
+          else
+            pnpm publish --access public --provenance --no-git-checks --tag ${{ steps.tag.outputs.dist_tag }}
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish create-sovecom-module
         working-directory: packages/create-sovecom-module
-        run: pnpm publish --access public --provenance --no-git-checks --tag ${{ steps.tag.outputs.dist_tag }}
+        run: |
+          name=$(node -p "require('./package.json').name")
+          ver=$(node -p "require('./package.json').version")
+          if npm view "$name@$ver" version >/dev/null 2>&1; then
+            echo "$name@$ver already published — skipping"
+          else
+            pnpm publish --access public --provenance --no-git-checks --tag ${{ steps.tag.outputs.dist_tag }}
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish create-sovecom-theme
         working-directory: packages/create-sovecom-theme
-        run: pnpm publish --access public --provenance --no-git-checks --tag ${{ steps.tag.outputs.dist_tag }}
+        run: |
+          name=$(node -p "require('./package.json').name")
+          ver=$(node -p "require('./package.json').version")
+          if npm view "$name@$ver" version >/dev/null 2>&1; then
+            echo "$name@$ver already published — skipping"
+          else
+            pnpm publish --access public --provenance --no-git-checks --tag ${{ steps.tag.outputs.dist_tag }}
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
