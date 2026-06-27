@@ -112,6 +112,12 @@ describe('B1 widened broker read surface (integration, real PG)', () => {
     db = h.app.get(DatabaseService);
     adapter = new BrokerReadAdapter(db);
 
+    // Seed the default tenant so FK constraints are satisfied regardless of suite execution order.
+    await db.db
+      .insert(tenants)
+      .values({ id: TENANT, name: 'Default', slug: 'default' })
+      .onConflictDoNothing();
+
     // Two products: one with a category, one without (unique slugs per run).
     [productWithCat, productNoCat] = await Promise.all(
       [`b1-with-cat-${RUN}`, `b1-no-cat-${RUN}`].map(async (slug) => {

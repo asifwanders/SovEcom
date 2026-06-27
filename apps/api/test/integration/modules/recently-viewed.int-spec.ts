@@ -35,6 +35,7 @@ import { DatabaseService } from '../../../src/database/database.service';
 import { products } from '../../../src/database/schema/products';
 import { categories } from '../../../src/database/schema/categories';
 import { productCategories } from '../../../src/database/schema/product_categories';
+import { tenants } from '../../../src/database/schema/_tenants';
 import { RpcPeer } from '../../../src/modules/runtime/rpc';
 import { createInMemoryChannelPair } from '../../../src/modules/runtime/worker-channel';
 import { createModuleSdk } from '../../../src/modules/runtime/worker-sdk';
@@ -93,6 +94,12 @@ describe('Recently-viewed module end-to-end (integration, real PG)', () => {
     await provisioner.deprovision(MOD).catch(() => undefined);
     await provisioner.provision(MOD);
     executor.open(MOD, await provisioner.rotateCredential(MOD));
+
+    // Seed the default tenant so FK constraints are satisfied regardless of suite execution order.
+    await db.db
+      .insert(tenants)
+      .values({ id: TENANT, name: 'Default', slug: 'default' })
+      .onConflictDoNothing();
 
     // Seed a few products so read:products enrichment + the existence guard resolve through the real
     // read adapter.

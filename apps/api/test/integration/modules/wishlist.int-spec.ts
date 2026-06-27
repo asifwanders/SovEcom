@@ -88,6 +88,10 @@ describe('Wishlist module end-to-end (integration, real PG)', () => {
 
     // Seed the default tenant + a product so list-enrichment has something to resolve.
     await db.db
+      .insert(tenants)
+      .values({ id: TENANT, name: 'Default', slug: 'default' })
+      .onConflictDoNothing();
+    await db.db
       .insert(products)
       .values({ tenantId: TENANT, title: 'Red Shirt', slug: 'red-shirt', status: 'published' })
       .onConflictDoNothing();
