@@ -1,6 +1,6 @@
 {
   "name": "create-sovecom-theme",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.1",
   "license": "MIT",
   "description": "Non-interactive scaffolder for a SovEcom theme starter.",
   "type": "module",

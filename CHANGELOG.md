@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-27
+
+### Added
+
+- **Marketing home-page sections**: a merchant admin editor (add, reorder, and configure hero, call-to-action, promo-tile, and rich-text sections, with image uploads) and matching storefront renderers.
+- **Guest identity**: wishlists and recently-viewed now persist for anonymous shoppers via a signed, tenant-bound cookie, and merge into the account on sign-in.
+- **Runtime-configurable images**: the admin, setup, and storefront images resolve the API URL at container start, so one image runs on any domain.
+- **Collapsible admin sidebar**: navigation is grouped into sections; only the section for the current page is open, and it resets on navigation.
+- Address fields now appear in the API's OpenAPI schema.
+
+### Fixed
+
+- Admin sessions now survive a page reload — the dashboard no longer redirected to the login page on runtime-configured deployments.
+- Clearer message when EU VAT (VIES) validation is temporarily unreachable.
+- Documentation tables now render correctly, and the SovEcom logo appears on the documentation site and the README.
+
 ## [1.0.0-rc.1] - 2026-06-26
 
 ### Summary
