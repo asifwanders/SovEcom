@@ -95,3 +95,9 @@ export * from './module_slot_resolutions';
  * legal + marketing copy. After `_tenants` so the FK resolves at load.
  * ------------------------------------------------------------------------- */
 export * from './pages';
+
+/* ---------------------------------------------------------------------------
+ * Storefront home sections — marketing section list singleton per tenant.
+ * After `_tenants` so the FK resolves at load.
+ * ------------------------------------------------------------------------- */
+export * from './storefront_home_sections';

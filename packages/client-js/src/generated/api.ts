@@ -2307,6 +2307,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/storefront/home-sections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the tenant home-page marketing sections (admin) */
+        get: operations["HomeSectionsAdminController_get"];
+        /** Replace the tenant home-page marketing sections (fail-closed: all entries validated or request rejected) */
+        put: operations["HomeSectionsAdminController_replace"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/store/v1/storefront/home-sections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the home-page marketing sections (public) — validated descriptors only */
+        get: operations["HomeSectionsStoreController_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/slots": {
         parameters: {
             query?: never;
@@ -2976,6 +3011,10 @@ export interface components {
             email: string;
             otp: string;
             password: string;
+        };
+        PutHomeSectionsBody: {
+            /** @description The ordered list of marketing section descriptors for the home page. Each entry must be a `{ type, settings }` object. Every entry is validated by the SDK schema — a single invalid entry rejects the whole request. Capped at 50 entries. */
+            sections: Record<string, never>[];
         };
         HealthCheckResult: {
             /**
@@ -6456,6 +6495,61 @@ export interface operations {
         requestBody?: never;
         responses: {
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    HomeSectionsAdminController_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    HomeSectionsAdminController_replace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutHomeSectionsBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    HomeSectionsStoreController_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

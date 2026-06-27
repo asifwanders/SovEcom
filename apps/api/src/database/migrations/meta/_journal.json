@@ -239,6 +239,13 @@
       "when": 1782501019000,
       "tag": "0033_clammy_landau",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1782620000000,
+      "tag": "0034_storefront_home_sections",
+      "breakpoints": true
     }
   ]
 }

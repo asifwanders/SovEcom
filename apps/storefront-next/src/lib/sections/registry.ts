@@ -38,6 +38,10 @@ import {
   ProductsGridSection,
   ProductsLoadMoreSection,
 } from '@/components/sections/ProductsSections';
+import { HeroBannerSection } from '@/components/sections/marketing/HeroBannerSection';
+import { CtaBannerSection } from '@/components/sections/marketing/CtaBannerSection';
+import { PromoTilesSection } from '@/components/sections/marketing/PromoTilesSection';
+import { RichTextSection } from '@/components/sections/marketing/RichTextSection';
 
 /** The validated section settings bag (opaque `Record<string, unknown>` from the template). */
 export type SectionSettings = Record<string, unknown>;
@@ -149,6 +153,12 @@ export const sectionRegistry: Readonly<Record<string, Section>> = {
   [ProductsHeaderSection.type]: ProductsHeaderSection,
   [ProductsGridSection.type]: ProductsGridSection,
   [ProductsLoadMoreSection.type]: ProductsLoadMoreSection,
+  // WS-3d: marketing home-page sections (RSC, no loader — data is fetched by the home page
+  // directly via fetchMarketingSections, not through the section-loader path).
+  'hero-banner': { type: 'hero-banner', Component: HeroBannerSection },
+  'cta-banner': { type: 'cta-banner', Component: CtaBannerSection },
+  'promo-tiles': { type: 'promo-tiles', Component: PromoTilesSection },
+  'rich-text': { type: 'rich-text', Component: RichTextSection },
 };
 
 /** Look up a registered section by `type`, or `undefined` when no section is registered for it. */

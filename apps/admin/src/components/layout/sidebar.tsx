@@ -26,6 +26,7 @@ import {
   Webhook,
   Palette,
   LayoutGrid,
+  LayoutTemplate,
   Boxes,
   BarChart3,
   ChevronLeft,
@@ -141,6 +142,12 @@ const GROUP_DEFS: {
         label: (t) => t('layout', 'themes'),
         icon: Palette,
         permission: 'themes:read',
+      },
+      {
+        to: '/home-sections',
+        label: (t) => t('layout', 'homeSections'),
+        icon: LayoutTemplate,
+        permission: 'themes:write',
       },
       {
         to: '/slots',

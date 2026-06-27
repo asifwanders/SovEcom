@@ -7,6 +7,7 @@
  * Catalog reads are inside the section loaders; a cold/unreachable API degrades to empty sections.
  * UI chrome is localized via the `home` namespace. Catalog data stays single-language.
  */
+import { Fragment } from 'react';
 import type { Metadata } from 'next';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { fetchActiveTheme } from '@/lib/theme';
@@ -15,6 +16,11 @@ import { renderSections } from '@/lib/sections/renderSections';
 import { Slot } from '@/components/Slot';
 import { siteOrigin } from '@/lib/seo';
 import { buildRouteMetadata } from '@/lib/metadata';
+import { fetchMarketingSections } from '@/lib/marketing';
+import { HeroBannerSection } from '@/components/sections/marketing/HeroBannerSection';
+import { CtaBannerSection } from '@/components/sections/marketing/CtaBannerSection';
+import { PromoTilesSection } from '@/components/sections/marketing/PromoTilesSection';
+import { RichTextSection } from '@/components/sections/marketing/RichTextSection';
 import type { Locale } from '@/i18n/routing';
 
 // ISR: home revalidates every 60s.
@@ -46,7 +52,10 @@ export default async function HomePage({ params }: { params: Promise<{ locale: L
 
   // Pick the active theme's name (null/unreachable → bundled `default` set), then compose
   // the page from its `home` template via the section runtime.
-  const theme = await fetchActiveTheme();
+  const [theme, marketingSections] = await Promise.all([
+    fetchActiveTheme(),
+    fetchMarketingSections(),
+  ]);
   const sections = await renderSections({
     page: 'home',
     themeName: resolveActiveThemeName(theme),
@@ -54,11 +63,44 @@ export default async function HomePage({ params }: { params: Promise<{ locale: L
     locale,
   });
 
+  // Render each validated marketing section by CALLING the async RSC directly (pattern mirrors
+  // renderSections.tsx: async RSC sections are awaited, not used as JSX elements, so the test
+  // renderer and the RSC runtime both receive a resolved ReactNode rather than a Promise).
+  const marketingNodes = await Promise.all(
+    marketingSections.map(async (descriptor, i) => {
+      const sharedProps = {
+        settings: descriptor.settings as unknown as Record<string, unknown>,
+        data: undefined,
+        locale,
+      };
+      // Each section is an async RSC — call it directly and await, then wrap with a key Fragment.
+      let node;
+      switch (descriptor.type) {
+        case 'hero-banner':
+          node = await HeroBannerSection(sharedProps);
+          break;
+        case 'cta-banner':
+          node = await CtaBannerSection(sharedProps);
+          break;
+        case 'promo-tiles':
+          node = await PromoTilesSection(sharedProps);
+          break;
+        case 'rich-text':
+          node = await RichTextSection(sharedProps);
+          break;
+      }
+      return <Fragment key={`marketing-${i}`}>{node}</Fragment>;
+    }),
+  );
+
   // Module slot: the `home-page-bottom` canonical slot. Renders nothing unless a module
   // binds it (and resolves cleanly); a failing/empty module is invisible. `<Slot>` is its own async RSC,
   // so it streams independently and never blocks the sections above.
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 space-y-10">
+      {/* WS-3d: merchant-authored marketing block, rendered above the template sections.
+          Empty when fetchMarketingSections returns [] — no wrapper rendered. */}
+      {marketingNodes.length > 0 && marketingNodes}
       {sections}
       <Slot name="home-page-bottom" route="/" />
     </div>

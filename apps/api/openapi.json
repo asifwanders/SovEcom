@@ -4772,6 +4772,59 @@
         ]
       }
     },
+    "/admin/v1/storefront/home-sections": {
+      "get": {
+        "operationId": "HomeSectionsAdminController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get the tenant home-page marketing sections (admin)",
+        "tags": [
+          "Admin / Storefront"
+        ]
+      },
+      "put": {
+        "operationId": "HomeSectionsAdminController_replace",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutHomeSectionsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Replace the tenant home-page marketing sections (fail-closed: all entries validated or request rejected)",
+        "tags": [
+          "Admin / Storefront"
+        ]
+      }
+    },
+    "/store/v1/storefront/home-sections": {
+      "get": {
+        "operationId": "HomeSectionsStoreController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get the home-page marketing sections (public) — validated descriptors only",
+        "tags": [
+          "Store / Storefront"
+        ]
+      }
+    },
     "/admin/v1/slots": {
       "get": {
         "operationId": "SlotsAdminController_list",
@@ -8345,6 +8398,21 @@
           "email",
           "otp",
           "password"
+        ]
+      },
+      "PutHomeSectionsBody": {
+        "type": "object",
+        "properties": {
+          "sections": {
+            "type": "array",
+            "description": "The ordered list of marketing section descriptors for the home page. Each entry must be a `{ type, settings }` object. Every entry is validated by the SDK schema — a single invalid entry rejects the whole request. Capped at 50 entries.",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "sections"
         ]
       },
       "HealthCheckResult": {
