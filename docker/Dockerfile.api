@@ -19,12 +19,20 @@ COPY packages/theme-contract-tests/package.json  ./packages/theme-contract-tests
 COPY packages/create-sovecom-module/package.json ./packages/create-sovecom-module/package.json
 COPY packages/create-sovecom-theme/package.json  ./packages/create-sovecom-theme/package.json
 COPY apps/api/package.json ./apps/api/package.json
+# Bundled reference modules — manifests needed before install so pnpm symlinks their
+# workspace deps (@sovecom/module-sdk), which `pnpm pack:bundled-modules` inlines via esbuild.
+COPY modules/reviews/package.json              ./modules/reviews/package.json
+COPY modules/recently-viewed/package.json      ./modules/recently-viewed/package.json
+COPY modules/wishlist/package.json             ./modules/wishlist/package.json
+COPY modules/notify-back-in-stock/package.json ./modules/notify-back-in-stock/package.json
 
 RUN pnpm install --frozen-lockfile
 
 # Copy source
 COPY packages/ ./packages/
 COPY apps/api/ ./apps/api/
+COPY modules/ ./modules/
+COPY scripts/ ./scripts/
 
 # Build workspace packages that API depends on (module-sdk first — theme-sdk depends on it)
 RUN pnpm --filter @sovecom/module-sdk build
@@ -33,6 +41,11 @@ RUN pnpm --filter @sovecom/client-js build
 
 # Build the API
 RUN pnpm --filter @sovecom/api build
+
+# Pack the bundled reference modules into apps/api/bundled-modules/<id>.tgz + .module.json
+# (gitignored build artifacts the setup wizard installs at first-run; the runtime reads them
+# from <apiRoot>/bundled-modules — see apps/api/src/modules/bundled-modules.ts).
+RUN pnpm pack:bundled-modules
 
 # Use pnpm deploy to create a self-contained production deployment
 RUN pnpm deploy --filter @sovecom/api --legacy --prod /app/deploy/api
@@ -48,6 +61,9 @@ WORKDIR /app
 
 # Copy the self-contained deploy output
 COPY --from=builder /app/deploy/api ./
+
+# Bundled reference modules — runtime resolves these at <apiRoot>/bundled-modules (dist/../..).
+COPY --from=builder /app/apps/api/bundled-modules ./bundled-modules
 
 # Create uploads dir and non-root user
 RUN mkdir -p /data/uploads && addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001 && chown -R nodejs:nodejs /data/uploads
