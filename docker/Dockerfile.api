@@ -65,8 +65,10 @@ COPY --from=builder /app/deploy/api ./
 # Bundled reference modules — runtime resolves these at <apiRoot>/bundled-modules (dist/../..).
 COPY --from=builder /app/apps/api/bundled-modules ./bundled-modules
 
-# Create uploads dir and non-root user
-RUN mkdir -p /data/uploads && addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001 && chown -R nodejs:nodejs /data/uploads
+# Create runtime data dirs (uploads + installed-modules root) and non-root user.
+# /data/modules is where the ingest places installed modules (MODULES_DATA_PATH); it must be
+# writable by the nodejs user AND mounted as a volume (see docker-compose.yml) to persist.
+RUN mkdir -p /data/uploads /data/modules && addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001 && chown -R nodejs:nodejs /data/uploads /data/modules
 USER nodejs
 
 EXPOSE 3000

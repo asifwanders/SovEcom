@@ -84,6 +84,9 @@ services:
       LOCAL_STORAGE_PATH: /data/uploads
     volumes:
       - uploads:/data/uploads
+      # Installed modules (ingest target, MODULES_DATA_PATH=/data/modules) — persist across
+      # container recreation/upgrades, else installed modules vanish on `up -d`.
+      - modules:/data/modules
     depends_on:
       postgres:
         condition: service_healthy
@@ -182,6 +185,7 @@ volumes:
   caddy_data:
   caddy_config:
   uploads:
+  modules:
 
 networks:
   sovecom:
