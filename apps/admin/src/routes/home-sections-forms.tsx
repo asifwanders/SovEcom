@@ -34,11 +34,12 @@ function useImageUpload(onUrl: (url: string) => void) {
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const res = await apiFetch<{ variants: { original: string } }>('/admin/v1/images', {
+      // ImageResponseDto returns `originalUrl` (not `variants.original`) — mirrors product-form fix.
+      const res = await apiFetch<{ id: string; originalUrl: string }>('/admin/v1/images', {
         method: 'POST',
         body: fd,
       });
-      onUrl(res.variants.original);
+      onUrl(res.originalUrl);
     } finally {
       setUploading(false);
     }
@@ -57,6 +58,10 @@ interface ImageFieldProps {
 
 export function ImageField({ id, label, value, onChange }: ImageFieldProps) {
   const { uploading, handleFile } = useImageUpload((url) => onChange(url));
+  // Ref to the hidden file input so the Button's onClick reliably opens the picker regardless of
+  // where in the button the user clicks (label-for propagation is unreliable when the button
+  // consumes the click event before it reaches the label).
+  const inputRef = React.useRef<HTMLInputElement>(null);
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
@@ -92,21 +97,32 @@ export function ImageField({ id, label, value, onChange }: ImageFieldProps) {
           </div>
         )}
       </div>
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input
-          type="file"
-          accept="image/*"
-          className="sr-only"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void handleFile(f);
-          }}
-          disabled={uploading}
-        />
-        <Button type="button" variant="secondary" size="sm" isLoading={uploading}>
-          {value ? 'Replace image' : 'Upload image'}
-        </Button>
-      </label>
+      {/* Hidden file input — opened programmatically via inputRef so the whole button area is clickable. */}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void handleFile(f);
+          // Reset so re-selecting the same file fires onChange again.
+          e.target.value = '';
+        }}
+        disabled={uploading}
+      />
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        isLoading={uploading}
+        onClick={() => inputRef.current?.click()}
+        aria-label={value ? 'Replace image' : 'Upload image'}
+      >
+        {value ? 'Replace image' : 'Upload image'}
+      </Button>
     </div>
   );
 }

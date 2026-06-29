@@ -60,6 +60,7 @@ export class ProductsAdminController {
     return this.service.adminList(user.tenantId, {
       page: query.page,
       pageSize: query.pageSize,
+      q: query.q,
       status: query.status,
       category: query.category,
       tag: query.tag,

@@ -7,6 +7,7 @@ import type { Locale } from '@/lib/i18n';
 import { apiFetch } from '@/lib/api';
 import { queryClient } from '@/lib/query-client';
 import { Menu, Moon, Sun, LogOut, User, Shield, Settings } from 'lucide-react';
+import { GlobalSearch } from '@/components/search/GlobalSearch';
 
 interface TopbarProps {
   onMenuToggle: () => void;
@@ -46,16 +47,22 @@ export function Topbar({ onMenuToggle, darkMode, onDarkModeToggle }: TopbarProps
 
   return (
     <header className="sticky top-0 z-30 h-14 border-b border-border bg-card/80 backdrop-blur flex items-center px-4 gap-3">
-      <button
-        type="button"
-        onClick={onMenuToggle}
-        className="lg:hidden inline-flex items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label={t('layout', 'openMenu')}
-      >
-        <Menu className="h-5 w-5" aria-hidden="true" />
-      </button>
+      {/* Left zone: hamburger (mobile only) */}
+      <div className="flex items-center shrink-0">
+        <button
+          type="button"
+          onClick={onMenuToggle}
+          className="lg:hidden inline-flex items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={t('layout', 'openMenu')}
+        >
+          <Menu className="h-5 w-5" aria-hidden="true" />
+        </button>
+      </div>
 
-      <div className="flex-1" />
+      {/* Center zone: inline global search input */}
+      <div className="flex-1 flex justify-center px-2">
+        <GlobalSearch />
+      </div>
 
       <label className="sr-only" htmlFor="locale-switcher">
         {t('layout', 'language')}

@@ -51,6 +51,8 @@ describe('PermissionsService (unit)', () => {
       PERMISSIONS.CUSTOMERS_READ,
       PERMISSIONS.ORDERS_READ,
       PERMISSIONS.AUDIT_LOG_READ,
+      // Dashboard stats: staff can VIEW the dashboard (operational read).
+      PERMISSIONS.DASHBOARD_READ,
     ];
     for (const p of expected) {
       expect(svc.hasPermission('staff', p)).toBe(true);

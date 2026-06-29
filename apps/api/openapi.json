@@ -365,6 +365,17 @@
             }
           },
           {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "x-nestjs_zod-parent-additional-properties": false,
+            "schema": {
+              "minLength": 1,
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
             "name": "status",
             "required": false,
             "in": "query",
@@ -3323,6 +3334,17 @@
             }
           },
           {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "x-nestjs_zod-parent-additional-properties": false,
+            "schema": {
+              "minLength": 1,
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
             "name": "status",
             "required": false,
             "in": "query",
@@ -4904,6 +4926,385 @@
         "summary": "Update storefront analytics config (partial; null/empty clears a field)",
         "tags": [
           "Admin / Analytics"
+        ]
+      }
+    },
+    "/admin/v1/stats/summary": {
+      "get": {
+        "operationId": "StatsAdminController_summary",
+        "parameters": [
+          {
+            "name": "from",
+            "required": true,
+            "in": "query",
+            "x-nestjs_zod-parent-additional-properties": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": true,
+            "in": "query",
+            "x-nestjs_zod-parent-additional-properties": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Dashboard summary KPIs with delta vs previous equal-length window",
+        "tags": [
+          "Admin / Stats"
+        ]
+      }
+    },
+    "/admin/v1/stats/timeseries": {
+      "get": {
+        "operationId": "StatsAdminController_timeseries",
+        "parameters": [
+          {
+            "name": "root",
+            "required": false,
+            "in": "query",
+            "allOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "from",
+                  "to"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "granularity": {
+                    "default": "day",
+                    "type": "string",
+                    "enum": [
+                      "day",
+                      "week",
+                      "month"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            ],
+            "x-nestjs_zod-unwrap-root": true,
+            "x-nestjs_zod-empty-type": true,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Zero-filled revenue+order-count timeseries for a date range",
+        "tags": [
+          "Admin / Stats"
+        ]
+      }
+    },
+    "/admin/v1/stats/top-products": {
+      "get": {
+        "operationId": "StatsAdminController_topProducts",
+        "parameters": [
+          {
+            "name": "root",
+            "required": false,
+            "in": "query",
+            "allOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "from",
+                  "to"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "limit": {
+                    "default": 5,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20
+                  },
+                  "by": {
+                    "default": "revenue",
+                    "type": "string",
+                    "enum": [
+                      "revenue",
+                      "quantity"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            ],
+            "x-nestjs_zod-unwrap-root": true,
+            "x-nestjs_zod-empty-type": true,
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Top products by revenue or quantity for a date range",
+        "tags": [
+          "Admin / Stats"
+        ]
+      }
+    },
+    "/admin/v1/stats/attention": {
+      "get": {
+        "operationId": "StatsAdminController_attention",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Current-state stock alerts, pending returns, unfulfilled orders",
+        "tags": [
+          "Admin / Stats"
+        ]
+      }
+    },
+    "/admin/v1/stats/customer-breakdown": {
+      "get": {
+        "operationId": "StatsAdminController_customerBreakdown",
+        "parameters": [
+          {
+            "name": "from",
+            "required": true,
+            "in": "query",
+            "x-nestjs_zod-parent-additional-properties": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": true,
+            "in": "query",
+            "x-nestjs_zod-parent-additional-properties": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "New-vs-returning customer split for a date range (guests excluded)",
+        "tags": [
+          "Admin / Stats"
+        ]
+      }
+    },
+    "/admin/v1/stats/status-breakdown": {
+      "get": {
+        "operationId": "StatsAdminController_statusBreakdown",
+        "parameters": [
+          {
+            "name": "from",
+            "required": true,
+            "in": "query",
+            "x-nestjs_zod-parent-additional-properties": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": true,
+            "in": "query",
+            "x-nestjs_zod-parent-additional-properties": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Order counts grouped by status (all 9 statuses) for a date range",
+        "tags": [
+          "Admin / Stats"
+        ]
+      }
+    },
+    "/admin/v1/users": {
+      "get": {
+        "operationId": "UsersAdminController_list",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 9007199254740991,
+              "default": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "List staff accounts for this tenant (paginated)",
+        "tags": [
+          "Admin / Users"
+        ]
+      },
+      "post": {
+        "operationId": "UsersAdminController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Create a new admin or staff account",
+        "tags": [
+          "Admin / Users"
+        ]
+      }
+    },
+    "/admin/v1/users/{id}/role": {
+      "patch": {
+        "operationId": "UsersAdminController_changeRole",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeRoleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Change the role of a staff account (admin/staff only; not owner; not self)",
+        "tags": [
+          "Admin / Users"
+        ]
+      }
+    },
+    "/admin/v1/users/{id}/deactivate": {
+      "patch": {
+        "operationId": "UsersAdminController_deactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Deactivate a staff account (sets disabled_at; invalidates sessions)",
+        "tags": [
+          "Admin / Users"
+        ]
+      }
+    },
+    "/admin/v1/users/{id}/reactivate": {
+      "patch": {
+        "operationId": "UsersAdminController_reactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Reactivate a disabled staff account (clears disabled_at)",
+        "tags": [
+          "Admin / Users"
         ]
       }
     },
@@ -8413,6 +8814,60 @@
         },
         "required": [
           "sections"
+        ]
+      },
+      "CreateUserDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 320,
+            "format": "email",
+            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "x-nestjs_zod-parent-additional-properties": false
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "x-nestjs_zod-parent-additional-properties": false
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "staff"
+            ],
+            "x-nestjs_zod-parent-additional-properties": false
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 1024,
+            "x-nestjs_zod-parent-additional-properties": false
+          }
+        },
+        "required": [
+          "email",
+          "name",
+          "role",
+          "password"
+        ]
+      },
+      "ChangeRoleDto": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "staff"
+            ],
+            "x-nestjs_zod-parent-additional-properties": false
+          }
+        },
+        "required": [
+          "role"
         ]
       },
       "HealthCheckResult": {

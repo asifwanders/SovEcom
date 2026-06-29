@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -58,6 +58,7 @@ interface Tag {
 export default function ProductFormPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const isEdit = !!id;
   const [error, setError] = React.useState<string | null>(null);
   const [variants, setVariants] = React.useState<Variant[]>([]);
@@ -67,6 +68,10 @@ export default function ProductFormPage() {
   const [images, setImages] = React.useState<{ id: string; imageId: string; url: string }[]>([]);
   const [uploading, setUploading] = React.useState(false);
   const [variantToDelete, setVariantToDelete] = React.useState<number | null>(null);
+  // Snapshot of persisted variants as last loaded from the server, keyed by id.
+  // Used in edit mode to diff: a persisted variant is PATCHed only when a field
+  // actually changed (otherwise the variant sub-resource is left untouched).
+  const loadedVariantsRef = React.useRef<Record<string, Variant>>({});
 
   const {
     data: product,
@@ -84,7 +89,9 @@ export default function ProductFormPage() {
         seoTitle: string | null;
         seoDescription: string | null;
         variants: Variant[];
-        images: { id: string; imageId: string; imageRow: { url: string } | null }[];
+        // `url` is computed server-side (adminFindById) from the image's thumbnail
+        // variant (else the original key); the client no longer touches raw keys.
+        images: { id: string; imageId: string; url: string | null }[];
         // The admin GET /products/:id endpoint does NOT include categories/tags
         // (see products.repository.ts findById — it only joins variants+images).
         // They're declared optional here so the reset effect can null-coalesce them.
@@ -132,46 +139,116 @@ export default function ProductFormPage() {
       seoTitle: product.seoTitle ?? '',
       seoDescription: product.seoDescription ?? '',
     });
-    setVariants(
-      (product.variants ?? []).map((v) => ({
-        ...v,
-        currency: v.currency.toUpperCase(),
-        _stableKey: v.id ?? crypto.randomUUID(),
-      })),
-    );
+    const loaded = (product.variants ?? []).map((v) => ({
+      ...v,
+      currency: v.currency.toUpperCase(),
+      _stableKey: v.id ?? crypto.randomUUID(),
+    }));
+    setVariants(loaded);
+    // Snapshot persisted variants (by id) so the save can diff against them.
+    loadedVariantsRef.current = loaded.reduce<Record<string, Variant>>((acc, v) => {
+      if (v.id) acc[v.id] = v;
+      return acc;
+    }, {});
     setAssignedCategoryIds((product.categories ?? []).map((c) => c.id));
     setAssignedTagIds((product.tags ?? []).map((t) => t.id));
     setImages(
       (product.images ?? [])
-        .filter((i) => i.imageRow)
-        .map((i) => ({ id: i.id, imageId: i.imageId, url: i.imageRow!.url })),
+        .filter((i): i is { id: string; imageId: string; url: string } => typeof i.url === 'string')
+        .map((i) => ({ id: i.id, imageId: i.imageId, url: i.url })),
     );
   }, [product, reset]);
 
+  /**
+   * Map a form Variant to the create/PATCH body shape the variant DTOs accept.
+   * Drops the client-only `_stableKey` and `id` (the sub-resource schemas are
+   * .strict()); numeric fields are coerced from the controlled inputs.
+   */
+  function toVariantBody(v: Variant): Record<string, unknown> {
+    return {
+      sku: v.sku || undefined,
+      title: v.title || undefined,
+      priceAmount: Number(v.priceAmount),
+      currency: v.currency,
+      stockQuantity: Number(v.stockQuantity),
+      allowBackorder: v.allowBackorder,
+      position: Number(v.position),
+    };
+  }
+
+  /**
+   * Persist variant create/update for EDIT mode by diffing the current `variants`
+   * state against the snapshot loaded from the server. New variants (no id) are
+   * POSTed; persisted variants whose fields changed are PATCHed (currency is
+   * always included alongside priceAmount, per the variant DTO contract). Deletes
+   * are handled live in removeVariant, so they need no work here.
+   */
+  async function syncVariantsForEdit(productId: string): Promise<void> {
+    for (const v of variants) {
+      if (!v.id) {
+        // New variant — create it.
+        await apiFetch(`/admin/v1/products/${productId}/variants`, {
+          method: 'POST',
+          body: JSON.stringify(toVariantBody(v)),
+        });
+        continue;
+      }
+      const prev = loadedVariantsRef.current[v.id];
+      // No snapshot (shouldn't happen) or an actual field change → PATCH.
+      if (
+        !prev ||
+        prev.sku !== v.sku ||
+        prev.title !== v.title ||
+        Number(prev.priceAmount) !== Number(v.priceAmount) ||
+        prev.currency !== v.currency ||
+        Number(prev.stockQuantity) !== Number(v.stockQuantity) ||
+        prev.allowBackorder !== v.allowBackorder ||
+        Number(prev.position) !== Number(v.position)
+      ) {
+        await apiFetch(`/admin/v1/products/${productId}/variants/${v.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(toVariantBody(v)),
+        });
+      }
+    }
+  }
+
   const saveMutation = useMutation({
     mutationFn: async (data: ProductFormData) => {
-      const payload = {
-        ...data,
-        // Strip the client-only _stableKey (used for stable React list keys) —
-        // the backend VariantCreateSchema is .strict() and rejects unknown fields.
-        variants: variants.map(({ _stableKey: _omit, ...v }) => ({
-          ...v,
-          priceAmount: Number(v.priceAmount),
-          stockQuantity: Number(v.stockQuantity),
-          position: Number(v.position),
-        })),
-      };
       let productId: string;
       if (isEdit) {
+        // BUG-1: the product PATCH body must contain ONLY the scalar fields the
+        // backend UpdateProductSchema (.strict()) accepts — `variants` is NOT one
+        // of them and previously made every save 400. Variants are persisted via
+        // their own sub-resource below.
         await apiFetch(`/admin/v1/products/${id}`, {
           method: 'PATCH',
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            title: data.title,
+            slug: data.slug || undefined,
+            description: data.description ?? '',
+            status: data.status,
+            seoTitle: data.seoTitle ?? '',
+            seoDescription: data.seoDescription ?? '',
+          }),
         });
         productId = id!;
+        // Diff variants against the loaded snapshot and persist each change via
+        // the variant sub-resource. (Deletes are already wired live in removeVariant.)
+        await syncVariantsForEdit(productId);
       } else {
+        // CREATE: variants ARE accepted inline by CreateProductSchema, so send them.
         const result = await apiFetch<{ id: string }>('/admin/v1/products', {
           method: 'POST',
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            title: data.title,
+            slug: data.slug || undefined,
+            description: data.description ?? '',
+            status: data.status,
+            seoTitle: data.seoTitle ?? '',
+            seoDescription: data.seoDescription ?? '',
+            variants: variants.map(toVariantBody),
+          }),
         });
         productId = result.id;
         // S6: attach any images uploaded during create to the newly created product
@@ -192,7 +269,10 @@ export default function ProductFormPage() {
         body: JSON.stringify({ tagIds: assignedTagIds }),
       });
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      // Resync the cached product so the form reflects server state (new variant
+      // ids, normalized slug) if the user returns to it.
+      if (isEdit) await queryClient.invalidateQueries({ queryKey: ['product', id] });
       navigate('/products');
     },
     onError: (err: unknown) => {
@@ -213,8 +293,10 @@ export default function ProductFormPage() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      // apiFetch detects FormData and omits Content-Type so the browser sets multipart + boundary
-      const result = await apiFetch<{ id: string; url: string }>('/admin/v1/images', {
+      // apiFetch detects FormData and omits Content-Type so the browser sets multipart + boundary.
+      // BUG-2a: the upload response field is `originalUrl` (ImageResponseDto), NOT `url` —
+      // reading `url` left the preview src undefined (blank thumbnail).
+      const result = await apiFetch<{ id: string; originalUrl: string }>('/admin/v1/images', {
         method: 'POST',
         body: formData,
       });
@@ -228,7 +310,10 @@ export default function ProductFormPage() {
       // On create: images accumulate in state and are attached after the product is saved (S6).
       // id and imageId are the same here (no join row yet); on edit the join row id
       // comes from the product query but we only need imageId for the detach call.
-      setImages((prev) => [...prev, { id: result.id, imageId: result.id, url: result.url }]);
+      setImages((prev) => [
+        ...prev,
+        { id: result.id, imageId: result.id, url: result.originalUrl },
+      ]);
     } catch {
       setError('Image upload failed');
     } finally {

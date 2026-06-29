@@ -10,7 +10,7 @@
  * transaction (serializes concurrent transitions).
  */
 import { Injectable } from '@nestjs/common';
-import { and, count, desc, eq, inArray, isNull, lt, notExists, sql } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, inArray, isNull, lt, notExists, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import { DatabaseService } from '../database/database.service';
 import { orders, type Order, type NewOrder } from '../database/schema/orders';
@@ -49,6 +49,7 @@ export interface StatusHistoryInput {
 export interface OrderListFilters {
   page: number;
   pageSize: number;
+  q?: string;
   status?: OrderStatus;
   customerId?: string;
 }
@@ -134,6 +135,12 @@ export class OrderRepository {
    */
   async listForTenant(tenantId: string, filters: OrderListFilters): Promise<OrderListResult> {
     const conditions = [eq(orders.tenantId, tenantId), isNull(orders.deletedAt)];
+    if (filters.q) {
+      // Escape LIKE metacharacters so a query like "50%" or "a_b" is matched literally.
+      // `\` is the default LIKE escape character in Postgres.
+      const escaped = filters.q.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+      conditions.push(ilike(orders.orderNumber, `%${escaped}%`));
+    }
     if (filters.status) conditions.push(eq(orders.status, filters.status));
     if (filters.customerId) conditions.push(eq(orders.customerId, filters.customerId));
     const where = and(...conditions);

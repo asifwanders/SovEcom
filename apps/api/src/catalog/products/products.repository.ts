@@ -7,7 +7,7 @@
  * share id/tenant_id/variants/alt_text column names.
  */
 import { Injectable } from '@nestjs/common';
-import { and, eq, sql, desc, asc, lte, gte, gt, lt, or, inArray, exists } from 'drizzle-orm';
+import { and, eq, sql, desc, asc, lte, gte, gt, lt, or, inArray, exists, ilike } from 'drizzle-orm';
 import { DatabaseService } from '../../database/database.service';
 import { products, type Product, type NewProduct } from '../../database/schema/products';
 import { productVariants, type ProductVariant } from '../../database/schema/product_variants';
@@ -20,6 +20,13 @@ import { images, type Image } from '../../database/schema/images';
 
 export interface ProductImageWithImageRow extends ProductImage {
   imageRow: Image | null;
+  /**
+   * Browser-viewable public URL for this image, computed at read time via
+   * StorageService.getPublicUrl (thumbnail variant if present, else original key).
+   * The repository leaves this undefined — it has no StorageService; the service
+   * layer (adminFindById) enriches it so the admin client never handles raw keys.
+   */
+  url?: string;
 }
 
 export interface ProductWithDetails extends Product {
@@ -35,6 +42,7 @@ export interface ProductWithDetails extends Product {
 }
 
 export interface ProductListFilters {
+  q?: string;
   status?: 'draft' | 'published' | 'archived';
   category?: string;
   tag?: string;
@@ -196,6 +204,12 @@ export class ProductsRepository {
     const dir = filters.order === 'asc' ? asc : desc;
 
     const conditions = [eq(products.tenantId, tenantId)];
+    if (filters.q) {
+      // Escape LIKE metacharacters so a query like "50%" or "a_b" is matched literally.
+      // `\` is the default LIKE escape character in Postgres.
+      const escaped = filters.q.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+      conditions.push(ilike(products.title, `%${escaped}%`));
+    }
     if (filters.status) conditions.push(eq(products.status, filters.status));
 
     if (filters.category) {

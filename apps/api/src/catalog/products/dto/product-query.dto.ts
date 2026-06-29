@@ -11,6 +11,7 @@ export const ProductQuerySchema = z
   .object({
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(200).default(20),
+    q: z.string().trim().min(1).max(200).optional(),
     status: z.enum(['draft', 'published', 'archived']).optional(),
     category: z.string().uuid().optional(),
     tag: z.string().uuid().optional(),

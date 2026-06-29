@@ -167,6 +167,25 @@ export class AuthService {
       return null;
     }
 
+    // (5) Disabled account: same uniform 401 as other failures (no information
+    // leakage about whether the account is disabled vs wrong-password).
+    // Checked AFTER verify() so the timing signature is the same as a successful
+    // verify that then returns null.
+    if (user.disabledAt !== null) {
+      await this.audit.record({
+        tenantId: user.tenantId,
+        actorType: 'user',
+        actorId: user.id,
+        action: 'auth.login.failed',
+        resourceType: 'user',
+        resourceId: user.id,
+        ip: ctx.ip,
+        userAgent: ctx.userAgent,
+        changes: { reason: 'account_disabled' },
+      });
+      return null;
+    }
+
     // Correct credentials. The soft lock is NON-remote-lockable: correct
     // creds bypass `locked_until` so an attacker cannot DoS a victim out of their
     // own valid password. We only block wrong-credential attempts on a lock.
@@ -356,6 +375,14 @@ export class AuthService {
         .where(and(eq(users.id, claimed.userId), eq(users.tenantId, claimed.tenantId)))
         .limit(1);
       if (!user) {
+        return null;
+      }
+
+      // Disabled account: a deactivated user must NOT be able to mint a fresh
+      // access token via the refresh path. Same uniform null → 401 outcome as the
+      // login disabled-check (no distinct error, no timing oracle). Defence in
+      // depth alongside the refresh-token revocation done at deactivate time.
+      if (user.disabledAt !== null) {
         return null;
       }
 

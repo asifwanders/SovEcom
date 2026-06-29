@@ -82,6 +82,10 @@ services:
       STORE_ORIGIN: https://${SOVECOM_DOMAIN:-localhost}
       # Local storage path (writable by nodejs user via named volume)
       LOCAL_STORAGE_PATH: /data/uploads
+      # Public base for local-storage asset URLs. Without it the local adapter
+      # falls back to http://localhost:3000, which is unreachable from a browser —
+      # uploaded product images render blank. The api host is proxied by Caddy.
+      PUBLIC_BASE_URL: https://api.${SOVECOM_DOMAIN:-localhost}
     volumes:
       - uploads:/data/uploads
       # Installed modules (ingest target, MODULES_DATA_PATH=/data/modules) — persist across

@@ -1,0 +1,69 @@
+---
+title: Dashboard
+description: Read your store's dashboard with confidence. Covers the KPI tiles, revenue chart, needs-attention row, top products, and cart-conversion metric, and how each number is calculated.
+---
+
+The dashboard is the first screen you see after signing in. It answers one question (how is the store doing right now) without making you open five reports. This guide explains what each number means and how it's calculated, so you can trust it.
+
+## Pick a period
+
+Everything on the page is scoped to the period you choose at the top: **Today**, **Last 7 days**, **Last 30 days**, **This month**, or a **Custom** range. Change the period and every tile, the chart, and the top-products list update together. The dashboard remembers your last choice and reopens to it next time.
+
+Each KPI tile also shows a change against the **previous equal-length period**: last 7 days vs the 7 days before that, this month vs last month, and so on. An up arrow is green, a down arrow is red, and the arrow and sign carry the meaning on their own, so colour isn't the only signal. When there's no prior data to compare against, the change shows as a dash.
+
+## The KPI tiles
+
+| Tile | What it measures |
+| --- | --- |
+| **Net revenue** | Sales minus refunds, for orders placed in the period. Cancelled, refunded, and not-yet-paid orders are excluded. |
+| **Orders** | Count of revenue-bearing orders placed in the period. |
+| **Average order value** | Net revenue ÷ orders. |
+| **New customers** | Customer accounts created in the period. |
+| **Return rate** | Returns requested in the period as a share of orders. |
+| **Refunds** | Total refunded in the period. |
+| **Cart conversion** | Carts that became orders ÷ carts that either converted or were abandoned. |
+
+"Revenue-bearing" means an order that has been paid and not voided: paid, fulfilled, shipped, delivered, completed, or partially refunded. Net revenue subtracts any amount already refunded on each order, so a partial refund lowers the figure right away.
+
+Most tiles also draw a small trend line (a sparkline) of that metric across the period, so you see the shape and not just the total. Return rate and cart conversion show the number alone.
+
+All money is shown in your store's currency. If you sell in more than one currency, the dashboard reports your configured store currency and does not mix currencies into a single total.
+
+### A note on "conversion"
+
+**Cart conversion is not website conversion.** SovEcom does not track sessions, pageviews, or visitor traffic, by design, to keep the platform privacy-first. The cart-conversion tile measures how many shopping carts turned into orders, not how many visitors bought. For traffic-based analytics, use the Plausible, Google Analytics, or Meta integration you configure under Settings → Analytics; those run on the storefront.
+
+## Revenue & orders chart
+
+The chart plots net revenue (bars) and order count (line) over the selected period. Switch the granularity between **day**, **week**, and **month** to zoom out on longer ranges. Periods with no sales show as zero rather than a gap, so the trend line stays continuous. Time buckets are in UTC.
+
+## Customers: new vs returning
+
+This breaks the customers who ordered in the period into two groups. A customer is **new** if their first-ever order falls in the period, and **returning** if they ordered earlier and came back. Guest checkouts (no account) are left out, since there's no identity to track them across orders. A healthy mix of both is what you want; all-new means you aren't retaining, all-returning means you aren't acquiring.
+
+## Orders by status
+
+The donut shows how the period's orders split across their lifecycle states: pending payment, paid, fulfilled, shipped, delivered, completed, cancelled, refunded, and partially refunded. Use it to spot a backlog at a glance, like a stack of paid-but-unfulfilled orders or a spike in cancellations.
+
+## Needs attention
+
+This row surfaces things to act on now, each linking straight to the relevant screen:
+
+- **Low stock** and **Out of stock**: variants at or below the low-stock threshold (5), and those at zero without backorder.
+- **Pending returns**: return requests awaiting a decision.
+- **Unfulfilled orders**: paid orders not yet fulfilled.
+- **Pending payment**: orders awaiting payment.
+
+These are live counts of current state, not tied to the selected period.
+
+## Top products & recent orders
+
+**Top products** ranks your best sellers for the period. Toggle between **by sales** (gross sales value of the items) and **by quantity** (units sold). Sales here are gross item totals; refunds don't reduce them, so this figure runs higher than the net-revenue tile. **Recent orders** lists the five most recent orders with their status; click any row to open the order.
+
+## Export to CSV
+
+The **Export CSV** button downloads the current view: the KPI figures for the period plus the day-by-day (or week/month) revenue, orders, new-customer, and refund series. Money columns stay in minor units (cents) with a currency column, so the numbers reconcile against your accounting without rounding surprises. The filename carries the date range.
+
+## Who can see it
+
+The dashboard requires the `dashboard:read` permission, held by the **staff**, **admin**, and **owner** roles. It is read-only; nothing on this page changes store data.

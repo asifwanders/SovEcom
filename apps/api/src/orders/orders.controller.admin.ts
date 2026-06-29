@@ -45,6 +45,7 @@ export class OrdersAdminController {
     return this.orders.adminList(user.tenantId, {
       page: query.page,
       pageSize: query.pageSize,
+      q: query.q,
       status: query.status as OrderStatus | undefined,
       customerId: query.customerId,
     });

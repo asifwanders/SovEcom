@@ -260,7 +260,26 @@ export class ProductsService {
   async adminFindById(tenantId: string, productId: string): Promise<ProductWithDetails> {
     const product = await this.products.findById(tenantId, productId);
     if (!product) throw new NotFoundException(`Product ${productId} not found`);
-    return product;
+    return this._enrichImageUrls(product);
+  }
+
+  /**
+   * Add a browser-viewable `url` to every product image so the admin client never
+   * has to handle raw storage keys. Prefers the thumbnail variant (webp → jpeg),
+   * falling back to the original key. Mirrors ImagesService URL derivation; the
+   * URL is computed at read time via StorageService (CDN root can change freely).
+   */
+  private _enrichImageUrls(product: ProductWithDetails): ProductWithDetails {
+    return {
+      ...product,
+      images: product.images.map((img) => {
+        if (!img.imageRow) return img;
+        const variantsMap = img.imageRow.variants as Record<string, Record<string, string>> | null;
+        const thumbKey = variantsMap?.thumbnail?.webp ?? variantsMap?.thumbnail?.jpeg;
+        const key = thumbKey ?? img.imageRow.originalKey;
+        return { ...img, url: key ? this.storage.getPublicUrl(key) : undefined };
+      }),
+    };
   }
 
   // ── Update / PATCH ───────────────────────────────────────────────────────────

@@ -38,6 +38,7 @@ const STAFF_PERMISSIONS: readonly Permission[] = [
   PERMISSIONS.CUSTOMERS_READ,
   PERMISSIONS.ORDERS_READ,
   PERMISSIONS.AUDIT_LOG_READ,
+  PERMISSIONS.DASHBOARD_READ,
 ];
 
 export const ROLE_PERMISSIONS: Readonly<Record<Role, ReadonlySet<Permission>>> = {

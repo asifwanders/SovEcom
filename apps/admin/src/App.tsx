@@ -37,6 +37,7 @@ import AnalyticsPage from '@/routes/analytics';
 import PagesPage from '@/routes/pages';
 import PageFormPage from '@/routes/page-form';
 import BusinessIdentityPage from '@/routes/business-identity';
+import StaffPage from '@/routes/staff';
 
 function App() {
   const setUser = useAuthStore((s) => s.setUser);
@@ -131,6 +132,7 @@ function App() {
               <Route path="/audit-log" element={<AuditLogPage />} />
               <Route path="/business-identity" element={<BusinessIdentityPage />} />
               <Route path="/settings" element={<TwoFactorSetupPage />} />
+              <Route path="/staff" element={<StaffPage />} />
             </Route>
           </Routes>
         </BrowserRouter>

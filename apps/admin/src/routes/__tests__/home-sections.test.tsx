@@ -221,7 +221,8 @@ describe('HomeSectionsPage', () => {
   it('sets an image field from the upload response URL', async () => {
     apiFetch.mockImplementation(async (path: string, _init?: RequestInit) => {
       if (path === '/admin/v1/images') {
-        return { variants: { original: 'https://example.com/img.jpg' } };
+        // Mirrors ImageResponseDto: the public URL is `originalUrl` (not variants.original).
+        return { id: 'img-1', originalUrl: 'https://example.com/img.jpg' };
       }
       return GET_RESPONSE;
     });

@@ -1,0 +1,36 @@
+---
+title: Staff Accounts
+description: Add staff and admin users, assign roles, and deactivate accounts that should no longer have access — and understand what each role can do.
+---
+
+Staff accounts let other people work in your store without sharing the owner login. Each person gets their own email, password, and role. You manage them under **Staff** in the admin sidebar (visible to owners and admins).
+
+## Roles
+
+| Role | Can do |
+| --- | --- |
+| **Owner** | Everything. The single account created during setup. Cannot be created, demoted, or deactivated from the Staff screen. |
+| **Admin** | Everything an owner can, including managing other staff, except acting on the owner. |
+| **Staff** | Day-to-day work (catalog, orders, customers) but not deletes, refunds, settings, modules, or staff management. |
+
+You can create **Admin** and **Staff** accounts. There is only ever one Owner.
+
+## Add a staff member
+
+1. Go to **Staff**, click **Add staff**.
+2. Enter their email, name, role, and an initial password. The password is checked against a breach list and a minimum length, so a weak or known-leaked password is rejected.
+3. Share the credentials with them over a secure channel. They sign in and can change their own password afterward.
+
+## Change a role
+
+Use **Change role** on a row to move someone between Admin and Staff. The change takes effect immediately: their current sessions are ended and they sign in again with the new role.
+
+## Deactivate and reactivate
+
+**Deactivate** blocks an account from signing in and ends all of its active sessions at once, including any that were already open. Use it the moment someone leaves. The account and its history stay intact, so you keep the audit trail. **Reactivate** restores access.
+
+You cannot deactivate or change the role of your own account, and no one can deactivate the owner. This stops you from locking yourself or the store out.
+
+## What's audited
+
+Creating an account, changing a role, and deactivating or reactivating are all written to the [audit log](/operator-guides/) with who did what and when. Review it periodically, especially after staff changes.

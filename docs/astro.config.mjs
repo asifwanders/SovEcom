@@ -46,10 +46,12 @@ export default defineConfig({
           label: 'Operator Guides',
           items: [
             { label: 'Getting Started', slug: 'operator-guides/getting-started' },
+            { label: 'Dashboard', slug: 'operator-guides/dashboard' },
             { label: 'Catalog', slug: 'operator-guides/catalog' },
             { label: 'Home Page', slug: 'operator-guides/storefront-home' },
             { label: 'Order Management', slug: 'operator-guides/orders' },
             { label: 'Customer Management', slug: 'operator-guides/customers' },
+            { label: 'Staff Accounts', slug: 'operator-guides/staff' },
             { label: 'Discounts', slug: 'operator-guides/discounts' },
             { label: 'Shipping', slug: 'operator-guides/shipping' },
             { label: 'Tax & VAT', slug: 'operator-guides/tax' },

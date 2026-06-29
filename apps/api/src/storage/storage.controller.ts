@@ -128,6 +128,13 @@ export class StorageController {
     res.setHeader('Content-Disposition', 'attachment');
     res.setHeader('Content-Security-Policy', 'sandbox');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    // These are PUBLIC assets (product images) embedded by the admin SPA and the
+    // storefront, which run on different origins than the API (admin.* / store domain
+    // vs api.*). The app-wide Helmet default `Cross-Origin-Resource-Policy: same-origin`
+    // blocks those cross-origin <img> loads (the image renders broken). Override to
+    // `cross-origin` so the assets are embeddable; the attachment+sandbox+nosniff trio
+    // above still prevents these bytes from executing as script in any origin.
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     // Variant objects are immutable (keyed by imageId); cache indefinitely.
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.status(HttpStatus.OK);

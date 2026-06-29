@@ -34,6 +34,7 @@ import {
 import { AuditService } from '../../../src/audit/audit.service';
 import { DatabaseService } from '../../../src/database/database.service';
 import { products } from '../../../src/database/schema/products';
+import { tenants } from '../../../src/database/schema/_tenants';
 import { RpcPeer } from '../../../src/modules/runtime/rpc';
 import { createInMemoryChannelPair } from '../../../src/modules/runtime/worker-channel';
 import { createModuleSdk } from '../../../src/modules/runtime/worker-sdk';
@@ -90,6 +91,10 @@ describe('Notify-back-in-stock module end-to-end (integration, real PG)', () => 
     executor.open(MOD, await provisioner.rotateCredential(MOD));
 
     // Seed the default tenant + a product so restock-email title enrichment has something to resolve.
+    await db.db
+      .insert(tenants)
+      .values({ id: TENANT, name: 'Default', slug: 'default' })
+      .onConflictDoNothing();
     await db.db
       .insert(products)
       .values({ tenantId: TENANT, title: 'Red Shirt', slug: 'red-shirt', status: 'published' })

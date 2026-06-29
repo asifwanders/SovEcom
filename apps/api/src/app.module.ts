@@ -31,6 +31,8 @@ import { ThemesModule } from './modules/themes.module';
 import { StorefrontModule } from './modules/storefront.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { SlotsModule } from './modules/slots.module';
+import { StatsModule } from './stats/stats.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -110,6 +112,12 @@ import { SlotsModule } from './modules/slots.module';
     // admin analytics-settings endpoint. Storefront read piggybacks
     // GET /store/v1/theme (ThemesModule); config lives in tenants.settings via TaxesModule.
     AnalyticsModule,
+    // Admin dashboard stats (summary, timeseries, top-products, attention).
+    // After OrdersModule/ReturnsModule/TaxesModule (TenantSettingsService for currency).
+    StatsModule,
+    // Admin staff-accounts management (list/create/role-change/deactivate/reactivate).
+    // Imports AuthModule for PasswordService. DatabaseService + AuditService are @Global.
+    UsersModule,
     HealthModule,
   ],
 })

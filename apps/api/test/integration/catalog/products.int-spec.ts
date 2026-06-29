@@ -843,6 +843,73 @@ describe('Catalog API — products integration', () => {
       expect(rowsAfter).toHaveLength(0);
     });
 
+    it('admin GET :id exposes a computed image url (thumbnail) for each image (BUG-2)', async () => {
+      const admin = await seedAdmin(h, { role: 'admin' });
+      const token = await login(h, admin.email, admin.password);
+      await switchDefaultTenant(h, admin.tenantId);
+
+      const createdProduct = await request(h.http())
+        .post(ADMIN_PRODUCTS)
+        .set('Authorization', `Bearer ${token}`)
+        .send(makeProductPayload())
+        .expect(201);
+      const productId = createdProduct.body.id as string;
+
+      const png = await solidPng();
+      const uploadRes = await request(h.http())
+        .post('/admin/v1/images')
+        .set('Authorization', `Bearer ${token}`)
+        .attach('file', png, { filename: 'thumb.png', contentType: 'image/png' });
+      const imageId = uploadRes.body.id as string;
+
+      await request(h.http())
+        .post(`${ADMIN_PRODUCTS}/${productId}/images`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ imageId, position: 0 })
+        .expect(201);
+
+      // The admin product-detail response must carry a browser-viewable `url`
+      // on each image (not the raw storage key the client can't render).
+      const detail = await request(h.http())
+        .get(`${ADMIN_PRODUCTS}/${productId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(detail.body.images).toHaveLength(1);
+      const img = detail.body.images[0];
+      expect(typeof img.url).toBe('string');
+      expect(img.url.length).toBeGreaterThan(0);
+      // It should point at the thumbnail variant served under /uploads, not a bare key.
+      expect(img.url).toContain('/uploads/');
+      expect(img.url).toContain('/thumbnail.');
+    });
+
+    it('PATCH product succeeds when the body has NO variants field (BUG-1)', async () => {
+      const admin = await seedAdmin(h, { role: 'admin' });
+      const token = await login(h, admin.email, admin.password);
+
+      const created = await request(h.http())
+        .post(ADMIN_PRODUCTS)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          ...makeProductPayload(),
+          variants: [{ sku: `v-${newId().slice(-6)}`, priceAmount: 999, currency: 'EUR' }],
+        })
+        .expect(201);
+      const productId = created.body.id as string;
+
+      // The fixed admin client sends ONLY scalar product fields on PATCH.
+      const patched = await request(h.http())
+        .patch(`${ADMIN_PRODUCTS}/${productId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          title: 'Renamed via scalar-only PATCH',
+          status: 'draft',
+          description: 'updated',
+        })
+        .expect(200);
+      expect(patched.body.title).toBe('Renamed via scalar-only PATCH');
+    });
+
     it('re-attaching the same image returns 409 (dedupe — F5)', async () => {
       const admin = await seedAdmin(h, { role: 'admin' });
       const token = await login(h, admin.email, admin.password);

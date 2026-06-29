@@ -16,6 +16,7 @@ export const OrderListQuerySchema = z
   .object({
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(200).default(20),
+    q: z.string().trim().min(1).max(200).optional(),
     status: orderStatus.optional(),
     customerId: z.string().uuid().optional(),
   })

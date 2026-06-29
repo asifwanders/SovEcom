@@ -28,7 +28,9 @@ export type Permission =
   | 'modules:read'
   | 'modules:write'
   | 'audit_log:read'
-  | 'audit_log:export';
+  | 'audit_log:export'
+  | 'users:read'
+  | 'users:write';
 
 const STAFF_PERMISSIONS: Permission[] = [
   'products:read',
@@ -55,6 +57,9 @@ const ALL_PERMISSIONS: Permission[] = [
   'modules:read',
   'modules:write',
   'audit_log:export',
+  // users management is owner/admin only — staff does NOT get these
+  'users:read',
+  'users:write',
 ];
 
 const ROLE_MAP: Record<string, Permission[]> = {

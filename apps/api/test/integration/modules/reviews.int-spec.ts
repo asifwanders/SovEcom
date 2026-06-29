@@ -34,6 +34,7 @@ import {
 import { AuditService } from '../../../src/audit/audit.service';
 import { DatabaseService } from '../../../src/database/database.service';
 import { products } from '../../../src/database/schema/products';
+import { tenants } from '../../../src/database/schema/_tenants';
 import { productVariants } from '../../../src/database/schema/product_variants';
 import { orders } from '../../../src/database/schema/orders';
 import { orderItems } from '../../../src/database/schema/order_items';
@@ -97,6 +98,12 @@ describe('Reviews module end-to-end (integration, real PG)', () => {
     await provisioner.provision(MOD);
     executor.open(MOD, await provisioner.rotateCredential(MOD));
 
+    // Seed the default tenant (FK parent) first — mirrors the other module specs so this
+    // suite is order-independent (it previously relied on another suite seeding the tenant).
+    await db.db
+      .insert(tenants)
+      .values({ id: TENANT, name: 'Default', slug: 'default' })
+      .onConflictDoNothing();
     // Seed a product so the read:products existence guard resolves it through the real read adapter.
     await db.db
       .insert(products)

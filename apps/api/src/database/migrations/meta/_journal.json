@@ -246,6 +246,13 @@
       "when": 1782620000000,
       "tag": "0034_storefront_home_sections",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782700000000,
+      "tag": "0035_staff_accounts_disabled_at",
+      "breakpoints": true
     }
   ]
 }

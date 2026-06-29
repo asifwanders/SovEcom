@@ -51,6 +51,9 @@ export const PERMISSIONS = {
   PAGES_READ: 'pages:read',
   PAGES_WRITE: 'pages:write',
   PAGES_DELETE: 'pages:delete',
+  // admin dashboard stats surface. Read-only KPI endpoint; no write gate needed.
+  // owner+admin via ALL_PERMISSIONS; staff gets it explicitly (operational view).
+  DASHBOARD_READ: 'dashboard:read',
 } as const;
 
 /** A valid permission string (union of every value in {@link PERMISSIONS}). */

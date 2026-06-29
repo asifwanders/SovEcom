@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { ChevronRight } from 'lucide-react';
 
 interface BreadcrumbItem {
   label: string;
@@ -15,7 +16,7 @@ export function Breadcrumbs({ items }: BreadcrumbsProps) {
       <ol className="flex items-center gap-2">
         {items.map((item, index) => (
           <li key={index} className="flex items-center gap-2">
-            {index > 0 && <span aria-hidden="true">/</span>}
+            {index > 0 && <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
             {item.to ? (
               <Link
                 to={item.to}
