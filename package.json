@@ -35,7 +35,7 @@
     "autocannon": "^8.0.0",
     "eslint": "^8.57.0",
     "husky": "^9.1.0",
-    "lint-staged": "^15.2.0",
+    "lint-staged": "^17.0.8",
     "prettier": "^3.2.0",
     "turbo": "^2.0.0",
     "typescript": "^5.4.0"
