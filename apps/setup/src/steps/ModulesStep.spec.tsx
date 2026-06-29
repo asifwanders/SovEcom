@@ -51,8 +51,10 @@ describe('ModulesStep', () => {
     render(<App api={api} />);
 
     expect(await screen.findByRole('heading', { name: /^modules$/i })).toBeInTheDocument();
-    expect(get).toHaveBeenCalledWith('/setup/v1/modules');
+    // Await the fetched data FIRST — the heading renders synchronously, before the
+    // load effect's fetch resolves, so asserting the call here races on slow runners.
     expect(await screen.findByText(/product reviews/i)).toBeInTheDocument();
+    expect(get).toHaveBeenCalledWith('/setup/v1/modules');
     expect(screen.getByText(/star ratings and written reviews/i)).toBeInTheDocument();
     // The already-installed module shows an Installed badge.
     expect(screen.getByText(/^installed$/i)).toBeInTheDocument();
