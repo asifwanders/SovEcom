@@ -39,13 +39,13 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "semver": "^7.8.4",
+    "semver": "^7.8.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/semver": "^7.7.1",
     "typescript": "^5.4.0",
-    "vitest": "^4.0.0"
+    "vitest": "^4.1.9"
   }
 }
