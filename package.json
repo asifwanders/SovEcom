@@ -28,7 +28,7 @@
     "release": "turbo build --filter=@sovecom/module-sdk --filter=@sovecom/theme-sdk --filter=@sovecom/client-js && changeset publish"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.27.0",
+    "@changesets/cli": "^2.31.1",
     "@commitlint/cli": "^19.0.0",
     "@commitlint/config-conventional": "^19.0.0",
     "@sovecom/eslint-config": "workspace:*",
@@ -36,8 +36,8 @@
     "eslint": "^8.57.0",
     "husky": "^9.1.0",
     "lint-staged": "^15.2.0",
-    "prettier": "^3.2.0",
-    "turbo": "^2.0.0",
+    "prettier": "^3.9.6",
+    "turbo": "^2.10.7",
     "typescript": "^5.4.0"
   },
   "lint-staged": {
