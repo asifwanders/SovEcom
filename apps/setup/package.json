@@ -16,31 +16,31 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@fontsource/ubuntu": "^5.2.8",
-    "@hookform/resolvers": "^5.4.0",
+    "@fontsource/ubuntu": "^5.3.0",
+    "@hookform/resolvers": "^5.9.1",
     "@sovecom/client-js": "workspace:*",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.0.0",
+    "lucide-react": "^1.40.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-hook-form": "^7.78.0",
+    "react-dom": "^19.2.8",
+    "react-hook-form": "^7.87.0",
     "tailwind-merge": "^3.6.0",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.0",
+    "@playwright/test": "^1.62.1",
     "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.0",
-    "@testing-library/user-event": "^14.6.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^6.0.0",
-    "autoprefixer": "^10.5.0",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "autoprefixer": "^10.5.4",
     "jsdom": "^29.0.0",
-    "postcss": "^8.5.15",
+    "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.4.5",
-    "vite": "^8.0.0",
+    "vite": "^8.2.2",
     "vitest": "^4.0.0"
   }
 }
